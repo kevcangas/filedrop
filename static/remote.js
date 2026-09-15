@@ -153,7 +153,8 @@ function connectTo(address, alias) {
   currentAlias = alias || address;
   currentAddress = address;
 
-  const url = address.includes("://") ? address : "http://" + address;
+  const defaultScheme = window.location.protocol === "https:" ? "https://" : "http://";
+  const url = address.includes("://") ? address : defaultScheme + address;
   socket = io(url, { transports: ["websocket", "polling"], reconnectionAttempts: 20 });
 
   document.getElementById("conn-pulse").className = "pulse searching";
