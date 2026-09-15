@@ -136,24 +136,12 @@ PASSWORD_ROTATE_DEFAULT_HOURS = float(os.environ.get("ENLACE_PASSWORD_ROTAR_HORA
 # la contrasena de nuevo (en dias).
 SESSION_DAYS = int(os.environ.get("ENLACE_SESION_DIAS", "10"))
 
-# Puerto en el que escucha el servidor.
-#
-# Antes era siempre el 5000, pero eso es un puerto muy conocido/facil de
-# adivinar o encontrar escaneando la red. Ahora, si no defines ENLACE_PORT,
-# se elige un puerto aleatorio (en un rango alto, poco usado por otros
-# programas) CADA VEZ que arrancas el servidor. Eso no reemplaza a la
-# contrasena -sigue siendo la proteccion real-, pero hace mucho mas dificil
-# que alguien en la red intente conectarse a Enlace sin que se lo hayas
-# compartido tu mismo (viendo el mensaje que se imprime al arrancar, o el
-# link/QR que le pases).
-#
-# Si prefieres un puerto fijo (por ejemplo porque configuraste un acceso
-# desde afuera con reenvio de puertos), define ENLACE_PORT con ese numero.
-_env_port = os.environ.get("ENLACE_PORT", "").strip()
-if _env_port:
+# Puerto en el que escucha el servidor (por defecto: 41823).
+_env_port = os.environ.get("ENLACE_PORT", "41823").strip()
+if _env_port and _env_port.isdigit():
     PORT = int(_env_port)
 else:
-    PORT = 20000 + secrets.randbelow(45000)  # entre 20000 y 64999
+    PORT = 41823
 
 # Si vas a exponer Enlace a internet con un tunel (ngrok, Cloudflare Tunnel,
 # etc.) o con redireccion de puertos + IP publica, puedes poner esa direccion
@@ -1182,9 +1170,7 @@ if __name__ == "__main__":
     elif PASSWORD_ROTATE_DEFAULT_HOURS > 0:
         print(f"   (la contraseña rota sola cada {PASSWORD_ROTATE_DEFAULT_HOURS:g}h; si activas avisos")
         print("    periódicos por correo, en vez de eso rota junto con ese intervalo)")
-    if not _env_port:
-        print("   (puerto aleatorio: cambia cada vez que arrancas el servidor;")
-        print("    fijalo con la variable de entorno ENLACE_PORT si lo necesitas fijo)")
+    print(f"   Puerto del servidor:           {PORT}")
     print("   Para cerrar: Ctrl+C en esta terminal (el puerto queda libre de inmediato).")
     if not PUBLIC_URL:
         print("-" * 60)

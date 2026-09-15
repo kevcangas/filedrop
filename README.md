@@ -72,17 +72,13 @@ Enlace corriendo
    Celular (misma WiFi):          http://192.168.1.50:41823/mobile
    Otra computadora (misma WiFi): http://192.168.1.50:41823/desktop
    Clave de acceso:               tu-contraseña
-   (puerto aleatorio: cambia cada vez que arrancas el servidor;
-    fijalo con la variable de entorno ENLACE_PORT si lo necesitas fijo)
+   Puerto del servidor:           41823
 ------------------------------------------------------------
    Consejo: esto por si solo SOLO funciona dentro de tu misma red WiFi.
    Si alguien se va a conectar desde otra red, usa un tunel como ngrok.
 ```
 
-El puerto (41823 en el ejemplo) es distinto cada vez que arrancas el
-servidor, justamente para que alguien en la misma red no pueda adivinarlo o
-encontrarlo escaneando el puerto 5000 de siempre. Usa el numero que te
-muestre tu propia terminal, no el de este ejemplo.
+Por defecto, Enlace escucha en el puerto fijo **41823** (puedes cambiarlo si deseas en tu archivo `.env` configurando `ENLACE_PORT`).
 
 Con cualquiera de las dos formas, abre (o se abre solo) la dirección de
 "Esta computadora (anfitriona)" en el navegador de esa misma PC. Te va a
@@ -419,10 +415,7 @@ para que nunca cambie.
 
 ## Notas técnicas
 
-- El servidor escoge un puerto **aleatorio** (entre 20000 y 64999) cada vez
-  que arranca, para que nadie en la red pueda simplemente probar el 5000 de
-  siempre. Usa el que te muestre la terminal al arrancar. Si prefieres uno
-  fijo, defínelo con la variable de entorno `ENLACE_PORT`.
+- El servidor escucha en el puerto fijo **41823** por defecto. Si prefieres otro puerto, defínelo con la variable de entorno `ENLACE_PORT` en tu archivo `.env`.
 - La IP que Enlace muestra en pantalla (para que celulares y otras PCs se
   conecten) se detecta sola por defecto. Si defines la variable de entorno
   `ENLACE_HOST_IP`, Enlace usa siempre esa IP en vez de detectarla —
