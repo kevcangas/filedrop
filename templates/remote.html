@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Enlace · Invitado</title>
+<link rel="manifest" href="/manifest.json?type={{ default_type }}">
+<meta name="theme-color" content="#0c1420">
+<link rel="stylesheet" href="/static/style.css">
+<script>window.ENLACE_DEFAULT_TYPE = "{{ default_type }}";</script>
+</head>
+<body class="role-guest type-{{ default_type }}">
+
+<div id="toasts" role="status" aria-live="polite"></div>
+
+<div class="mobile-shell">
+  <div class="brand spread">
+    <div class="row">
+      <span class="brand-mark">ENLACE</span>
+      <span class="brand-sub" id="brand-sub">{{ "computadora invitada" if default_type == "pc" else "celular invitado" }}</span>
+      <span class="role-pill">Invitado</span>
+    </div>
+    <a href="/logout" class="device-meta">cerrar sesión</a>
+  </div>
+
+  <!-- Pantalla: no conectado -->
+  <div id="screen-connect">
+    <div class="panel">
+      <p class="panel-title">Conectar a la computadora anfitriona</p>
+      <div class="stack">
+        <div>
+          <label for="input-ip">Dirección IP y puerto</label>
+          <input type="text" id="input-ip" placeholder="192.168.1.50:41823">
+        </div>
+        <div>
+          <label for="input-device-name">Nombre de este dispositivo</label>
+          <input type="text" id="input-device-name" placeholder="p. ej. Celular de Ana">
+          <p class="empty-hint" style="padding:4px 0 0; margin:0;">Así te van a ver los demás dispositivos conectados. Se autocompleta, pero puedes cambiarlo.</p>
+        </div>
+        <div>
+          <label for="input-alias">Guardar esta conexión como (opcional)</label>
+          <input type="text" id="input-alias" placeholder="Casa, oficina…">
+        </div>
+        <div>
+          <label>Este dispositivo es</label>
+          <div class="row" id="type-toggle">
+            <button type="button" data-type="phone" id="type-phone">📱 Celular</button>
+            <button type="button" data-type="pc" id="type-pc">💻 Computadora</button>
+          </div>
+        </div>
+        <button class="primary" id="btn-connect-new">Guardar y conectar</button>
+      </div>
+    </div>
+
+    <div class="panel" id="saved-panel">
+      <p class="panel-title">Guardadas</p>
+      <div id="saved-list" class="stack">
+        <p class="empty-hint">Todavía no tienes conexiones guardadas.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pantalla: conectado -->
+  <div id="screen-connected" style="display:none;">
+    <div class="panel">
+      <div class="spread">
+        <div class="row">
+          <span class="pulse live" id="conn-pulse"></span>
+          <div>
+            <div class="device-name" id="conn-alias">—</div>
+            <div class="device-meta" id="conn-ip">—</div>
+          </div>
+        </div>
+        <div class="row">
+          <button id="btn-notif-enable">🔔 Activar</button>
+          <button id="btn-disconnect">Desconectar</button>
+        </div>
+      </div>
+      <p class="empty-hint" id="notif-status" style="padding:8px 0 0; margin:0;">
+        Avísame con una notificación del sistema cuando llegue un archivo o algo al portapapeles, aunque no esté viendo esta pestaña.
+      </p>
+    </div>
+
+    <div class="panel">
+      <p class="panel-title">Dispositivos disponibles</p>
+      <p class="empty-hint" style="padding:0 0 8px 0;">
+        🖥️ con la insignia "Anfitriona" es la computadora que ejecuta el programa. Los demás son dispositivos que solo se anexaron para transferir.
+      </p>
+      <div id="device-list" class="stack">
+        <p class="empty-hint">Ningún otro dispositivo conectado todavía.</p>
+      </div>
+    </div>
+
+    <div class="panel">
+      <p class="panel-title">Enviar archivo</p>
+      <div id="dropzone" class="dropzone">
+        <div class="dz-title">Toca para elegir archivo(s)</div>
+        <div class="dz-sub">se envían al dispositivo seleccionado arriba (o a todos, con "Global") — si eliges varios, se empaquetan en un .zip automáticamente</div>
+        <input type="file" id="file-input" multiple style="display:none;">
+        <input type="file" id="folder-input" webkitdirectory style="display:none;">
+      </div>
+      <div class="row" style="margin-top:10px; justify-content:space-between;">
+        <label style="display:flex; align-items:center; gap:6px; text-transform:none; letter-spacing:normal; font-size:13px; color:var(--text);">
+          <input type="checkbox" id="chk-buzon" style="width:auto;">
+          Guardar en el buzón
+        </label>
+        <button id="btn-pick-folder">Elegir una carpeta</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="spread">
+        <p class="panel-title" style="margin-bottom:0;">Buzón (para descargar después)</p>
+        <button id="btn-buzon-refresh">Actualizar</button>
+      </div>
+      <p class="empty-hint" style="padding:0 0 8px 0;">
+        Lo que te manden aquí se queda guardado en el servidor un tiempo, aunque no estés conectado en ese momento.
+      </p>
+      <div id="buzon-list" class="stack">
+        <p class="empty-hint">Nada en el buzón todavía.</p>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="spread">
+        <p class="panel-title" style="margin-bottom:0;">Portapapeles compartido</p>
+        <span class="device-meta" id="clipboard-from"></span>
+      </div>
+      <textarea id="clipboard-text" rows="3" placeholder="Aquí aparece lo último compartido, o escribe/pega algo para enviarlo…"></textarea>
+      <div class="row" style="margin-top:10px; justify-content:flex-end;">
+        <button id="btn-clipboard-copy">Copiar a mi portapapeles</button>
+        <button class="primary" id="btn-clipboard-send">Enviar portapapeles</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <p class="panel-title">Transferencias</p>
+      <div id="transfers" class="stack">
+        <p class="empty-hint">Sin actividad todavía.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal de oferta de archivo entrante -->
+<div id="offer-modal" class="modal-backdrop" style="display:none;">
+  <div class="modal">
+    <p class="panel-title">Archivo entrante</p>
+    <p id="offer-text" style="margin-top:0;"></p>
+    <img id="offer-preview" style="display:none; max-width:100%; border-radius:6px; margin-bottom:10px;">
+    <div class="row" style="justify-content:flex-end;">
+      <button id="offer-reject" class="danger">Rechazar</button>
+      <button id="offer-accept" class="primary">Aceptar</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/socket.io.min.js"></script>
+<script src="/static/jszip.min.js"></script>
+<script src="/static/transfer.js"></script>
+<script src="/static/notifications.js"></script>
+<script src="/static/remote.js"></script>
+</body>
+</html>

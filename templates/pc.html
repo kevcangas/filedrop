@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#10161c">
+<title>Enlace · Panel de PC</title>
+<link rel="stylesheet" href="/static/style.css">
+<style>
+  .page-tabs {
+    display: flex;
+    gap: 8px;
+    max-width: 1000px;
+    margin: 0 auto 16px;
+  }
+  .page-tabs button { flex: 1; }
+  .badge-pill {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 20px;
+    background: var(--panel-2);
+    color: var(--text-muted);
+  }
+</style>
+</head>
+<body class="role-host">
+
+<div id="toasts" role="status" aria-live="polite"></div>
+
+<div class="brand spread" style="max-width:1000px; margin-left:auto; margin-right:auto;">
+  <div class="row">
+    <span class="brand-mark">ENLACE</span>
+    <span class="brand-sub">panel de computadora anfitriona</span>
+    <span class="role-pill">Anfitrión</span>
+  </div>
+  <a href="/logout" class="device-meta">cerrar sesión</a>
+</div>
+
+<!-- ── selector de pestaña: lo que se usa a diario vs. configuración ocasional ── -->
+<div class="page-tabs">
+  <button type="button" class="primary" id="tab-btn-transferir">📤 Transferir</button>
+  <button type="button" id="tab-btn-config">⚙️ Configuración</button>
+</div>
+
+<!-- ══════════════════ PESTAÑA: TRANSFERIR (lo de todos los días) ══════════════════ -->
+<div class="grid" id="tab-transferir">
+
+  <!-- Columna izquierda: identidad de la PC + dispositivos -->
+  <div class="stack">
+    <div class="panel">
+      <p class="panel-title">Esta computadora</p>
+      <div class="readout">
+        <div>
+          <div class="readout-label">Dirección para conectar otros dispositivos</div>
+          <div class="readout-value" id="ip-value">{{ local_ip }}:{{ port }}</div>
+        </div>
+        <button id="copy-ip">Copiar</button>
+      </div>
+      <p class="empty-hint" style="margin-top:10px;">
+        Celular: abre <span style="font-family:var(--mono)">http://{{ local_ip }}:{{ port }}/mobile</span><br>
+        Otra computadora: abre <span style="font-family:var(--mono)">http://{{ local_ip }}:{{ port }}/desktop</span><br>
+        (misma red WiFi en ambos casos — el puerto cambia cada vez que arrancas el servidor)
+      </p>
+    </div>
+
+    <div class="panel">
+      <p class="panel-title">Dispositivos conectados</p>
+      <p class="empty-hint" style="padding:0 0 8px 0;">
+        Estos son los celulares y computadoras que se anexaron para transferir. Esta computadora (la que corre el programa) no aparece en su propia lista.
+      </p>
+      <div id="device-list" class="stack">
+        <p class="empty-hint">Ningún otro dispositivo conectado todavía.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Columna derecha: envío, portapapeles y transferencias -->
+  <div class="stack">
+    <div class="panel">
+      <p class="panel-title">Enviar archivo</p>
+      <div id="dropzone" class="dropzone">
+        <div class="dz-title">Suelta uno o varios archivos aquí</div>
+        <div class="dz-sub">se envían al dispositivo seleccionado a la izquierda (o a todos, con "Global") — si son varios, se empaquetan en un .zip automáticamente</div>
+        <input type="file" id="file-input" multiple style="display:none;">
+        <input type="file" id="folder-input" webkitdirectory style="display:none;">
+      </div>
+      <div class="row" style="margin-top:10px; justify-content:space-between;">
+        <label style="display:flex; align-items:center; gap:6px; text-transform:none; letter-spacing:normal; font-size:13px; color:var(--text);">
+          <input type="checkbox" id="chk-buzon" style="width:auto;">
+          Guardar en el buzón (para descargar después)
+        </label>
+        <button id="btn-pick-folder">Elegir una carpeta completa</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="spread">
+        <p class="panel-title" style="margin-bottom:0;">Buzón (para descargar después)</p>
+        <button id="btn-buzon-refresh">Actualizar</button>
+      </div>
+      <p class="empty-hint" style="padding:0 0 8px 0;">
+        Lo que te manden aquí se queda guardado en el servidor un tiempo, aunque no estés conectado en ese momento.
+      </p>
+      <div id="buzon-list" class="stack">
+        <p class="empty-hint">Nada en el buzón todavía.</p>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="spread">
+        <p class="panel-title" style="margin-bottom:0;">Portapapeles compartido</p>
+        <span class="device-meta" id="clipboard-from"></span>
+      </div>
+      <textarea id="clipboard-text" rows="3" placeholder="Aquí aparece lo último compartido, o escribe/pega algo para enviarlo…"></textarea>
+      <div class="row" style="margin-top:10px; justify-content:flex-end;">
+        <button id="btn-clipboard-copy">Copiar a mi portapapeles</button>
+        <button class="primary" id="btn-clipboard-send">Enviar portapapeles</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <p class="panel-title">Transferencias</p>
+      <div id="transfers" class="stack">
+        <p class="empty-hint">Sin actividad todavía.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════ PESTAÑA: CONFIGURACIÓN (lo ocasional) ══════════════════ -->
+<div class="grid" id="tab-config" style="display:none;">
+
+  <div class="stack">
+    <div class="panel">
+      <div class="spread">
+        <p class="panel-title" style="margin-bottom:0;">Notificaciones nativas</p>
+        <button id="btn-notif-enable">Activar</button>
+      </div>
+      <p class="empty-hint" style="padding:0; margin-top:8px;" id="notif-status">
+        Avísame con una notificación del sistema cuando llegue un archivo o algo al portapapeles, aunque no esté viendo esta pestaña.
+      </p>
+    </div>
+
+    <div class="panel">
+      <p class="panel-title">Compartir acceso por correo</p>
+      <p class="empty-hint" style="padding:0 0 8px 0;">
+        Manda la dirección y la contraseña de esta sesión a alguien que no esté en tu red. "Abrir en mi correo" siempre funciona (usa tu propia cuenta); "Enviar automáticamente" solo funciona si se configuró un correo emisor en el servidor (ver README).
+      </p>
+      <div>
+        <label for="input-correo-destino">Correo destino</label>
+        <input type="text" id="input-correo-destino" placeholder="alguien@ejemplo.com">
+      </div>
+      <div class="row" style="margin-top:10px; justify-content:flex-end;">
+        <button id="btn-correo-abrir">Abrir en mi correo</button>
+        <button class="primary" id="btn-correo-enviar">Enviar automáticamente</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="stack">
+    <!-- ══ PANEL: Notificaciones periódicas por correo ══ -->
+    <div class="panel" id="panel-email-notif">
+      <div class="spread">
+        <p class="panel-title" style="margin-bottom:0;">Notificaciones periódicas por correo</p>
+        <span id="email-notif-badge" class="badge-pill">Cargando…</span>
+      </div>
+
+      <!-- Estado: inactivo -->
+      <div id="email-notif-off" style="display:none; margin-top:10px;">
+        <p class="empty-hint" style="padding:0 0 10px 0;">
+          Sin notificaciones activas. Configura abajo para recibir la contraseña
+          y la dirección del servidor cada cierto tiempo.
+        </p>
+
+        <div class="stack">
+          <div>
+            <label for="en-to">Correo destino</label>
+            <input type="email" id="en-to" placeholder="tuemail@gmail.com">
+          </div>
+          <div>
+            <label for="en-user">Cuenta emisora (Gmail, Outlook…)</label>
+            <input type="email" id="en-user" placeholder="tucuenta@gmail.com">
+          </div>
+          <div>
+            <label for="en-pass">Contraseña de aplicación</label>
+            <input type="password" id="en-pass" placeholder="no tu contraseña normal">
+          </div>
+          <div style="display:flex; gap:8px;">
+            <div style="flex:1;">
+              <label for="en-interval">Enviar cada</label>
+              <select id="en-interval">
+                <option value="1" selected>1 hora</option>
+                <option value="2">2 horas</option>
+                <option value="6">6 horas</option>
+                <option value="12">12 horas</option>
+                <option value="24">24 horas</option>
+              </select>
+            </div>
+            <div style="flex:1;">
+              <label for="en-duration">Mantener activo</label>
+              <select id="en-duration">
+                <option value="0" selected>Hasta desactivar</option>
+                <option value="24">24 horas</option>
+                <option value="72">3 días</option>
+                <option value="168">7 días</option>
+              </select>
+            </div>
+          </div>
+          <div style="text-align:right;">
+            <button class="primary" id="btn-en-activar">Activar y mandar primer correo</button>
+          </div>
+          <p id="en-activar-msg" style="font-size:12px; color:var(--danger); display:none;"></p>
+        </div>
+      </div>
+
+      <!-- Estado: activo -->
+      <div id="email-notif-on" style="display:none; margin-top:10px;">
+        <div class="readout">
+          <div>
+            <div class="readout-label">Enviando a</div>
+            <div class="readout-value" id="en-on-to" style="font-size:14px;"></div>
+          </div>
+        </div>
+        <div style="display:flex; gap:16px; margin-top:8px; font-size:12px; color:var(--text-muted);">
+          <span>Cada <strong id="en-on-interval"></strong> h</span>
+          <span>Último envío: <strong id="en-on-last"></strong></span>
+          <span id="en-on-expira" style="display:none;">Expira: <strong id="en-on-expira-val"></strong></span>
+        </div>
+        <div style="margin-top:12px; text-align:right;">
+          <button id="btn-en-desactivar" class="danger">Desactivar notificaciones</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ PANEL: URL pública / ngrok ══ -->
+    <div class="panel">
+      <div class="spread">
+        <p class="panel-title" style="margin-bottom:0;">URL pública (ngrok / túnel)</p>
+        <span id="ngrok-badge" class="badge-pill">No configurada</span>
+      </div>
+      <p class="empty-hint" style="padding:0 0 8px 0; margin-top:6px;">
+        Si usas ngrok o Cloudflare Tunnel, pega aquí la URL que genera cada sesión.
+        Se incluirá automáticamente en los correos periódicos.
+      </p>
+      <div>
+        <label for="input-ngrok-url">URL del túnel</label>
+        <input type="text" id="input-ngrok-url"
+               placeholder="https://xxxx-xx-xx-xx-xx.ngrok-free.app">
+      </div>
+      <div class="row" style="margin-top:10px; justify-content:flex-end;">
+        <button id="btn-ngrok-copy" style="display:none;">Copiar</button>
+        <button class="primary" id="btn-ngrok-guardar">Guardar</button>
+        <button id="btn-ngrok-borrar" style="display:none;" class="danger">Borrar</button>
+      </div>
+      <p id="ngrok-msg" style="font-size:12px; color:var(--accent); display:none; margin-top:6px;"></p>
+    </div>
+  </div>
+
+</div>
+
+<!-- Modal de oferta de archivo entrante -->
+<div id="offer-modal" class="modal-backdrop" style="display:none;">
+  <div class="modal">
+    <p class="panel-title">Archivo entrante</p>
+    <p id="offer-text" style="margin-top:0;"></p>
+    <img id="offer-preview" style="display:none; max-width:100%; border-radius:6px; margin-bottom:10px;">
+    <div class="row" style="justify-content:flex-end;">
+      <button id="offer-reject" class="danger">Rechazar</button>
+      <button id="offer-accept" class="primary">Aceptar</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/socket.io.min.js"></script>
+<script src="/static/jszip.min.js"></script>
+<script src="/static/transfer.js"></script>
+<script src="/static/notifications.js"></script>
+<script src="/static/pc.js"></script>
+
+<script>
+/* ══════════════════════════════════════════════════════════════════
+   PESTAÑAS: Transferir (uso diario) / Configuración (ocasional)
+   ══════════════════════════════════════════════════════════════════ */
+(function pageTabs() {
+  var btnTransferir = document.getElementById('tab-btn-transferir');
+  var btnConfig     = document.getElementById('tab-btn-config');
+  var panelTransferir = document.getElementById('tab-transferir');
+  var panelConfig     = document.getElementById('tab-config');
+
+  function setTab(tab) {
+    var esTransferir = tab === 'transferir';
+    btnTransferir.classList.toggle('primary', esTransferir);
+    btnConfig.classList.toggle('primary', !esTransferir);
+    panelTransferir.style.display = esTransferir ? '' : 'none';
+    panelConfig.style.display = esTransferir ? 'none' : '';
+  }
+
+  btnTransferir.addEventListener('click', function () { setTab('transferir'); });
+  btnConfig.addEventListener('click', function () { setTab('config'); });
+})();
+
+/* ══════════════════════════════════════════════════════════════════
+   NOTIFICACIONES PERIÓDICAS POR CORREO
+   ══════════════════════════════════════════════════════════════════ */
+(function emailNotifPanel() {
+
+  const badge      = document.getElementById('email-notif-badge');
+  const panelOff   = document.getElementById('email-notif-off');
+  const panelOn    = document.getElementById('email-notif-on');
+
+  const enTo       = document.getElementById('en-to');
+  const enUser     = document.getElementById('en-user');
+  const enPass     = document.getElementById('en-pass');
+  const enInterval = document.getElementById('en-interval');
+  const enDuration = document.getElementById('en-duration');
+  const btnActivar = document.getElementById('btn-en-activar');
+  const msgActivar = document.getElementById('en-activar-msg');
+
+  const enOnTo       = document.getElementById('en-on-to');
+  const enOnInterval = document.getElementById('en-on-interval');
+  const enOnLast     = document.getElementById('en-on-last');
+  const enOnExpira   = document.getElementById('en-on-expira');
+  const enOnExpiraV  = document.getElementById('en-on-expira-val');
+  const btnDesact    = document.getElementById('btn-en-desactivar');
+
+  function fmtTime(ts) {
+    if (!ts) return '—';
+    return new Date(ts * 1000).toLocaleString('es-MX', { hour:'2-digit', minute:'2-digit', day:'2-digit', month:'2-digit' });
+  }
+
+  function renderEstado(cfg) {
+    if (cfg.enabled) {
+      badge.textContent = '● Activo';
+      badge.style.background = 'var(--success-bg, #0f2f1e)';
+      badge.style.color = 'var(--success, #4caf7d)';
+      panelOff.style.display = 'none';
+      panelOn.style.display  = 'block';
+      enOnTo.textContent       = cfg.to_addr;
+      enOnInterval.textContent = cfg.interval_hours;
+      enOnLast.textContent     = fmtTime(cfg.last_sent);
+      if (cfg.duration_hours > 0) {
+        enOnExpira.style.display = '';
+        enOnExpiraV.textContent = fmtTime(cfg.started_at + cfg.duration_hours * 3600);
+      } else {
+        enOnExpira.style.display = 'none';
+      }
+    } else {
+      badge.textContent = '○ Inactivo';
+      badge.style.background = '';
+      badge.style.color = '';
+      panelOff.style.display = 'block';
+      panelOn.style.display  = 'none';
+    }
+  }
+
+  async function cargarEstado() {
+    try {
+      const r = await fetch('/api/email_notif/estado');
+      if (r.ok) renderEstado(await r.json());
+    } catch (_) {}
+  }
+
+  btnActivar.addEventListener('click', async function() {
+    msgActivar.style.display = 'none';
+    if (!enTo.value || !enUser.value || !enPass.value) {
+      msgActivar.textContent = 'Rellena correo destino, cuenta emisora y contraseña de app.';
+      msgActivar.style.color = 'var(--danger)';
+      msgActivar.style.display = 'block';
+      return;
+    }
+    btnActivar.disabled = true;
+    btnActivar.textContent = 'Enviando…';
+    try {
+      const r = await fetch('/api/email_notif/configurar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to_addr:        enTo.value.trim(),
+          smtp_user:      enUser.value.trim(),
+          smtp_pass:      enPass.value,
+          interval_hours: parseFloat(enInterval.value),
+          duration_hours: parseFloat(enDuration.value),
+        })
+      });
+      const data = await r.json();
+      if (r.ok) {
+        msgActivar.textContent = data.warning || '✓ Activado. Primer correo en camino.';
+        msgActivar.style.color = data.warning ? 'var(--warning, #e6a817)' : 'var(--success, #4caf7d)';
+        msgActivar.style.display = 'block';
+        enPass.value = '';    // no dejar la contraseña en pantalla
+        await cargarEstado();
+      } else {
+        msgActivar.textContent = data.error || 'Error al activar.';
+        msgActivar.style.color = 'var(--danger)';
+        msgActivar.style.display = 'block';
+      }
+    } catch (e) {
+      msgActivar.textContent = 'Error de red: ' + e.message;
+      msgActivar.style.color = 'var(--danger)';
+      msgActivar.style.display = 'block';
+    } finally {
+      btnActivar.disabled = false;
+      btnActivar.textContent = 'Activar y mandar primer correo';
+    }
+  });
+
+  btnDesact.addEventListener('click', async function() {
+    btnDesact.disabled = true;
+    try {
+      await fetch('/api/email_notif/desactivar', { method: 'POST' });
+      await cargarEstado();
+    } finally {
+      btnDesact.disabled = false;
+    }
+  });
+
+  // Cargar estado al abrir y refrescar cada 2 minutos
+  cargarEstado();
+  setInterval(cargarEstado, 120_000);
+
+})();
+
+
+/* ══════════════════════════════════════════════════════════════════
+   PANEL DE URL PÚBLICA / NGROK
+   ══════════════════════════════════════════════════════════════════ */
+(function ngrokPanel() {
+
+  const inputUrl   = document.getElementById('input-ngrok-url');
+  const btnGuardar = document.getElementById('btn-ngrok-guardar');
+  const btnBorrar  = document.getElementById('btn-ngrok-borrar');
+  const btnCopy    = document.getElementById('btn-ngrok-copy');
+  const badge      = document.getElementById('ngrok-badge');
+  const msg        = document.getElementById('ngrok-msg');
+
+  async function cargarInfo() {
+    try {
+      const r    = await fetch('/api/info');
+      const data = await r.json();
+      if (data.public_url) {
+        inputUrl.value = data.public_url;
+        badge.textContent = '● Activa';
+        badge.style.color = 'var(--success, #4caf7d)';
+        btnBorrar.style.display = '';
+        btnCopy.style.display   = '';
+      } else {
+        badge.textContent = 'No configurada';
+        badge.style.color = '';
+        btnBorrar.style.display = 'none';
+        btnCopy.style.display   = 'none';
+      }
+    } catch (_) {}
+  }
+
+  btnGuardar.addEventListener('click', async function() {
+    const url = inputUrl.value.trim();
+    msg.style.display = 'none';
+    try {
+      await fetch('/api/ngrok/actualizar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url })
+      });
+      msg.textContent = url ? '✓ URL guardada. Se incluirá en el próximo correo.' : '✓ URL eliminada.';
+      msg.style.display = 'block';
+      await cargarInfo();
+    } catch (e) {
+      msg.textContent = 'Error: ' + e.message;
+      msg.style.display = 'block';
+    }
+  });
+
+  btnBorrar.addEventListener('click', async function() {
+    inputUrl.value = '';
+    btnGuardar.click();
+  });
+
+  btnCopy.addEventListener('click', function() {
+    navigator.clipboard?.writeText(inputUrl.value).catch(() => {});
+  });
+
+  cargarInfo();
+
+})();
+</script>
+</body>
+</html>

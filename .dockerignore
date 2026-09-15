@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+build/
+dist/
+*.spec.bak
+uploads/*
+buzon/*
+!buzon/_index.json
+.git/
+.gitignore
+.env*
+!.env.example

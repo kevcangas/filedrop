@@ -1,0 +1,50 @@
+# Enlace como aplicacion/servicio nativo de Linux (systemd)
+# ------------------------------------------------------------------
+# Con esto, Enlace corre en segundo plano como cualquier aplicacion del
+# sistema: arranca solo cuando prendes la computadora, sigue corriendo
+# aunque cierres sesion, y si llegara a fallar systemd lo reinicia solo.
+# Es la alternativa a "iniciar.sh" (that requires a una terminal abierta)
+# para cuando quieres dejar esta maquina como servidor permanente de
+# Enlace en tu red, con una IP fija.
+#
+# INSTALACION (una sola vez):
+#   1. Edita las 3 lineas marcadas "<-- EDITA" mas abajo:
+#        - User=            tu usuario de Linux
+#        - WorkingDirectory= la carpeta donde esta este server.py
+#        - Environment=ENLACE_PASSWORD=...  tu contraseña de acceso
+#        - Environment=ENLACE_HOST_IP=...   la IP fija de esta maquina
+#          en tu red (resérvala en el router para que no cambie)
+#   2. Copia este archivo a systemd:
+#        sudo cp enlace.service /etc/systemd/system/enlace.service
+#   3. Recarga systemd y activa el servicio:
+#        sudo systemctl daemon-reload
+#        sudo systemctl enable --now enlace.service
+#
+# USO DIARIO:
+#   Ver si esta corriendo:   systemctl status enlace
+#   Ver la clave de acceso
+#   y las direcciones:       journalctl -u enlace -n 40 --no-pager
+#   Reiniciarlo:              sudo systemctl restart enlace
+#   Pararlo:                  sudo systemctl stop enlace
+#   Que ya no arranque solo:  sudo systemctl disable enlace
+# ------------------------------------------------------------------
+
+[Unit]
+Description=Enlace (transferencia de archivos, portapapeles y notificaciones)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tu-usuario
+# <-- EDITA: pon la ruta real donde descomprimiste la carpeta "filedrop"
+WorkingDirectory=/home/tu-usuario/filedrop
+# <-- EDITA: ruta al archivo .env (o variables especificas)
+EnvironmentFile=-/home/tu-usuario/filedrop/.env
+Environment=ENLACE_NO_BROWSER=1
+ExecStart=/usr/bin/python3 /home/tu-usuario/filedrop/server.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

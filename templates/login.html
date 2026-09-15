@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Enlace · Acceso</title>
+<link rel="stylesheet" href="/static/style.css">
+<style>
+  /* ── panel de avisos por correo: selector Sí/No + tarjetas de config ── */
+  .option-desc {
+    font-size: 12.5px;
+    color: var(--text-muted);
+    margin: 0 0 12px;
+    line-height: 1.45;
+  }
+  .option-toggle { display: flex; gap: 8px; }
+  .option-toggle button { flex: 1; }
+
+  .email-cfg { display: none; margin-top: 14px; }
+  .email-cfg.visible { display: block; }
+
+  /* tarjetas pequeñas dentro del panel, para que varios campos juntos no
+     se vean como una sola pared de inputs */
+  .subcard {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+  }
+  .subcard + .subcard { margin-top: 10px; }
+  .subcard-title {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin: 0 0 10px;
+  }
+  .subcard label { margin-top: 8px; }
+  .subcard > div:first-of-type label { margin-top: 0; }
+
+  .row-split { display: flex; gap: 8px; }
+  .row-split > div { flex: 1; }
+  .hint-small { font-size: 11px; color: var(--text-muted); margin: 4px 0 0; line-height: 1.4; }
+
+  .login-error {
+    color: var(--danger);
+    font-size: 13px;
+    margin: 0;
+    background: rgba(224, 87, 74, 0.08);
+    border: 1px solid rgba(224, 87, 74, 0.3);
+    border-radius: 8px;
+    padding: 8px 10px;
+  }
+
+  details > summary { font-size: 12px; color: var(--text-muted); cursor: pointer; }
+  details[open] > summary { margin-bottom: 8px; }
+</style>
+</head>
+<body>
+
+<div class="mobile-shell" style="margin-top: 8vh;">
+  <div class="brand" style="justify-content:center;">
+    <span class="brand-mark">ENLACE</span>
+  </div>
+
+  <form method="POST" action="/login" class="stack">
+    <input type="hidden" name="next" value="{{ next_path }}">
+
+    <!-- ── panel 1: contraseña ── -->
+    <div class="panel">
+      <p class="panel-title">Contraseña de acceso</p>
+      <div class="stack">
+        <div>
+          <label for="password">Escribe la contraseña para entrar</label>
+          <input type="password" id="password" name="password" autofocus autocomplete="current-password">
+        </div>
+        {% if error %}
+        <p class="login-error">{{ error }}</p>
+        {% endif %}
+      </div>
+    </div>
+
+    {% if es_anfitriona %}
+    <!-- ── panel 2: avisos por correo (opt-in, solo anfitriona) ── -->
+    <div class="panel">
+      <p class="panel-title">Avisos por correo</p>
+      <p class="option-desc">
+        Opcional: recibe la contraseña y las direcciones de acceso en tu correo
+        cada cierto tiempo, útil si sueles olvidar la clave o el enlace.
+      </p>
+
+      <input type="hidden" id="chk-email-activo" name="email_activo" value="">
+
+      <div class="option-toggle" id="email-toggle">
+        <button type="button" class="primary" id="opt-off">No, gracias</button>
+        <button type="button" id="opt-on">Sí, quiero avisos</button>
+      </div>
+
+      <div class="email-cfg" id="email-cfg-block">
+
+        <div class="subcard">
+          <p class="subcard-title">Destino</p>
+          <div>
+            <label for="email_destino">Correo donde recibirás los avisos</label>
+            <input type="email" id="email_destino" name="email_destino"
+                   placeholder="tuemail@gmail.com" autocomplete="email">
+          </div>
+        </div>
+
+        <div class="subcard">
+          <p class="subcard-title">Cuenta que envía</p>
+          <div>
+            <label for="smtp_user">Tu cuenta de correo emisora (Gmail, Outlook…)</label>
+            <input type="email" id="smtp_user" name="smtp_user"
+                   placeholder="tucuenta@gmail.com" autocomplete="username">
+          </div>
+          <div>
+            <label for="smtp_pass">Contraseña de aplicación</label>
+            <input type="password" id="smtp_pass" name="smtp_pass"
+                   placeholder="clave de app, no tu contraseña normal"
+                   autocomplete="new-password">
+            <p class="hint-small">
+              Gmail: <a href="https://myaccount.google.com/apppasswords"
+                        target="_blank" rel="noopener">myaccount.google.com/apppasswords</a><br>
+              Outlook / Hotmail: Configuración → Seguridad → Contraseñas de aplicación
+            </p>
+          </div>
+
+          <details>
+            <summary>Opciones avanzadas de SMTP (solo si no usas Gmail)</summary>
+            <div class="row-split">
+              <div>
+                <label for="smtp_host">Servidor SMTP</label>
+                <input type="text" id="smtp_host" name="smtp_host"
+                       placeholder="smtp.gmail.com" value="smtp.gmail.com">
+              </div>
+              <div style="max-width:90px;">
+                <label for="smtp_port">Puerto</label>
+                <input type="number" id="smtp_port" name="smtp_port"
+                       placeholder="587" value="587" min="1" max="65535">
+              </div>
+            </div>
+          </details>
+        </div>
+
+        <div class="subcard">
+          <p class="subcard-title">Frecuencia</p>
+          <div class="row-split">
+            <div>
+              <label for="intervalo">Enviar cada</label>
+              <select id="intervalo" name="intervalo">
+                <option value="1" selected>1 hora</option>
+                <option value="2">2 horas</option>
+                <option value="6">6 horas</option>
+                <option value="12">12 horas</option>
+                <option value="24">24 horas</option>
+              </select>
+            </div>
+            <div>
+              <label for="duracion">Mantener activo</label>
+              <select id="duracion" name="duracion">
+                <option value="0" selected>Hasta desactivar</option>
+                <option value="24">24 horas</option>
+                <option value="72">3 días</option>
+                <option value="168">7 días</option>
+              </select>
+            </div>
+          </div>
+          <p class="hint-small">
+            El primer correo se manda al entrar. Luego se repite según el intervalo.
+            Puedes desactivarlo desde el panel de la computadora anfitriona.
+          </p>
+        </div>
+
+      </div>
+      <!-- /email-cfg-block -->
+    </div>
+    {% endif %}
+
+    <button class="primary" type="submit" style="width:100%;">Entrar</button>
+  </form>
+
+  <p class="empty-hint" style="text-align:center;">
+    Pídele la contraseña a quien esté corriendo el servidor de Enlace.
+  </p>
+</div>
+
+<script>
+(function () {
+  var optOff = document.getElementById('opt-off');
+  var optOn = document.getElementById('opt-on');
+  if (!optOff || !optOn) return;  // login de invitado: no hay panel de correo que armar
+
+  function setEmailOption(active) {
+    optOff.classList.toggle('primary', !active);
+    optOn.classList.toggle('primary', active);
+    document.getElementById('chk-email-activo').value = active ? '1' : '';
+    document.getElementById('email-cfg-block').classList.toggle('visible', active);
+    // los campos solo son obligatorios si el bloque esta visible
+    ['email_destino', 'smtp_user', 'smtp_pass'].forEach(function (id) {
+      document.getElementById(id).required = active;
+    });
+  }
+  optOff.onclick = function () { setEmailOption(false); };
+  optOn.onclick = function () { setEmailOption(true); };
+})();
+</script>
+
+</body>
+</html>

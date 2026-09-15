@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Enlace
+Comment=Transferencia de archivos, portapapeles y notificaciones entre dispositivos
+# <-- EDITA: reemplaza /RUTA/ABSOLUTA/A/filedrop por donde descomprimiste esta carpeta
+Exec=/bin/bash -c "cd /RUTA/ABSOLUTA/A/filedrop && ./iniciar.sh"
+Icon=/RUTA/ABSOLUTA/A/filedrop/static/icons/icon-512.png
+Terminal=true
+Categories=Network;FileTransfer;Utility;

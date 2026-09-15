@@ -1,0 +1,42 @@
+# Environment files & Secrets
+.env
+.env.*
+*.env
+!.env.example
+
+# Uploaded files and user mailbox storage
+uploads/*
+!uploads/.gitkeep
+buzon/*
+!buzon/_index.json
+!buzon/.gitkeep
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+env.bak/
+venv.bak/
+
+# Build, executable & package output
+build/
+dist/
+*.spec.bak
+*.exe
+
+# IDEs & Editor settings
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS specific files
+.DS_Store
+Thumbs.db
