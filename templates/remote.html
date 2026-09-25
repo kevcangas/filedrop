@@ -99,14 +99,34 @@
         <input type="file" id="file-input" multiple style="display:none;">
         <input type="file" id="folder-input" webkitdirectory style="display:none;">
       </div>
-      <div class="row" style="margin-top:10px; justify-content:space-between;">
-        <label style="display:flex; align-items:center; gap:6px; text-transform:none; letter-spacing:normal; font-size:13px; color:var(--text);">
-          <input type="checkbox" id="chk-buzon" style="width:auto;">
-          Guardar en el buzón
-        </label>
-        <button id="btn-pick-folder">Elegir una carpeta</button>
+      <div class="dest-selector-box" style="margin-top:12px; padding:10px 12px; background:var(--panel-2); border:1px solid var(--border); border-radius:var(--radius);">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <span style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted);">Destino del archivo:</span>
+          <button id="btn-pick-folder" style="padding:4px 10px; font-size:12px;">Elegir carpeta</button>
+        </div>
+        <div class="row" style="gap:12px; flex-wrap:wrap; font-size:13px;">
+          <label style="display:flex; align-items:center; gap:6px; cursor:pointer; text-transform:none; letter-spacing:normal; margin:0;">
+            <input type="radio" name="dest-target" id="dest-device" value="device" checked style="width:auto; margin:0;">
+            <span>📱 Dispositivo</span>
+          </label>
+          <label style="display:flex; align-items:center; gap:6px; cursor:pointer; text-transform:none; letter-spacing:normal; margin:0;">
+            <input type="radio" name="dest-target" id="dest-buzon" value="buzon" style="width:auto; margin:0;">
+            <span>📥 Buzón</span>
+          </label>
+          <label id="lbl-dest-s3" style="display:flex; align-items:center; gap:6px; cursor:pointer; text-transform:none; letter-spacing:normal; margin:0;">
+            <input type="radio" name="dest-target" id="dest-s3" value="s3" style="width:auto; margin:0;">
+            <span>☁️ S3 Nube</span>
+          </label>
+        </div>
+        <div id="s3-target-hint" style="display:none; margin-top:8px; font-size:12px; color:var(--accent-2); align-items:center; gap:6px;">
+          <span>📁 En S3:</span>
+          <code id="s3-current-target-folder" style="font-family:var(--mono); background:rgba(0,0,0,0.3); padding:2px 6px; border-radius:4px;">(raíz)</code>
+        </div>
       </div>
+      <!-- Checkbox oculto para compatibilidad con funciones previas -->
+      <input type="checkbox" id="chk-buzon" style="display:none;">
     </div>
+
 
     <div class="panel">
       <div class="spread">
@@ -120,6 +140,44 @@
         <p class="empty-hint">Nada en el buzón todavía.</p>
       </div>
     </div>
+
+    <!-- Panel de Almacenamiento S3 en Móvil -->
+    <div class="panel" id="s3-remote-panel">
+      <div class="spread" style="align-items:center; flex-wrap:wrap; gap:8px;">
+        <div>
+          <p class="panel-title" style="margin-bottom:2px;">☁️ Almacenamiento S3</p>
+          <div class="row" style="gap:6px; align-items:center;">
+            <span class="s3-badge" id="s3-user-prefix-badge">users/...</span>
+            <span class="device-meta" id="s3-stats-meta">0 archivos</span>
+          </div>
+        </div>
+        <div class="row" style="gap:6px;">
+          <button id="btn-s3-new-folder" style="font-size:12px; padding:4px 8px;">➕ Carpeta</button>
+          <button id="btn-s3-refresh" style="font-size:12px; padding:4px 8px;">Actualizar</button>
+        </div>
+      </div>
+
+      <div style="margin-top:10px;">
+        <input type="text" id="s3-search-input" placeholder="🔍 Filtrar por nombre..." style="width:100%;">
+      </div>
+
+      <div class="s3-breadcrumbs-bar" id="s3-breadcrumbs">
+        <span class="s3-crumb active" data-folder="">🏠 Inicio</span>
+      </div>
+
+      <div id="s3-folders-container" style="display:none;">
+        <p style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted); margin:8px 0 4px 0;">Carpetas:</p>
+        <div class="s3-folder-grid" id="s3-folders-list"></div>
+      </div>
+
+      <div id="s3-files-container">
+        <p style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted); margin:8px 0 4px 0;">Archivos:</p>
+        <div class="stack" id="s3-files-list">
+          <p class="empty-hint">Cargando archivos...</p>
+        </div>
+      </div>
+    </div>
+
 
     <div class="panel">
       <div class="spread">
@@ -155,7 +213,28 @@
   </div>
 </div>
 
+<!-- Modal de Vista Previa S3 -->
+<div id="s3-preview-modal" class="modal-backdrop" style="display:none;">
+  <div class="modal s3-preview-modal">
+    <div class="spread" style="align-items:center;">
+      <p class="panel-title" id="s3-preview-title" style="margin:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Vista previa</p>
+      <button id="s3-preview-close" style="padding:4px 8px; font-size:14px;">✕</button>
+    </div>
+    <div class="s3-preview-body" id="s3-preview-body">
+      <p class="empty-hint">Cargando...</p>
+    </div>
+    <div class="row" style="justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+      <span class="device-meta" id="s3-preview-meta"></span>
+      <div class="row" style="gap:8px;">
+        <button id="s3-preview-copy-link">🔗 Copiar enlace</button>
+        <button class="primary" id="s3-preview-download">📥 Descargar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script src="/static/socket.io.min.js"></script>
+
 <script src="/static/jszip.min.js"></script>
 <script src="/static/transfer.js"></script>
 <script src="/static/notifications.js"></script>

@@ -157,25 +157,81 @@ socket.on("disconnect", () => {
   }
 });
 
+// Variable global para la subcarpeta de S3 activa
+let currentS3Folder = "";
+
+function getActiveDestination() {
+  const destS3 = document.getElementById("dest-s3");
+  if (destS3 && destS3.checked) return "s3";
+  const destBuzon = document.getElementById("dest-buzon");
+  if (destBuzon && destBuzon.checked) return "buzon";
+  return "device";
+}
+
+function updateS3DestinationHint() {
+  const hintEl = document.getElementById("s3-target-hint");
+  const folderEl = document.getElementById("s3-current-target-folder");
+  if (hintEl) {
+    const isS3 = getActiveDestination() === "s3";
+    hintEl.style.display = isS3 ? "flex" : "none";
+  }
+  if (folderEl) {
+    folderEl.textContent = currentS3Folder ? `/${currentS3Folder}` : "(raíz)";
+  }
+}
+
+function setupDestinationSelector() {
+  const radios = document.querySelectorAll('input[name="dest-target"]');
+  const chkBuzon = document.getElementById("chk-buzon");
+  radios.forEach((r) => {
+    r.addEventListener("change", () => {
+      const dest = getActiveDestination();
+      if (chkBuzon) chkBuzon.checked = (dest === "buzon");
+      updateS3DestinationHint();
+    });
+  });
+
+  fetchS3Status(getDeviceId()).then((status) => {
+    const lblS3 = document.getElementById("lbl-dest-s3");
+    if (lblS3) {
+      if (!status.enabled) {
+        lblS3.title = "S3 desactivado (ENLACE_S3_ENABLED=0 en .env)";
+        lblS3.style.opacity = "0.6";
+      } else if (!status.connected) {
+        lblS3.title = "S3 no conectado: " + (status.error || "revisa credenciales");
+      } else {
+        lblS3.title = `S3 activo (Bucket: ${status.bucket})`;
+      }
+    }
+  });
+}
+
 // --- Enviar archivo(s) al dispositivo seleccionado -----------------------------
 
 async function sendItemsToSelected(items) {
   if (items.length === 0) return;
 
-  const wantsBuzon = document.getElementById("chk-buzon").checked;
+  const destination = getActiveDestination();
+  const wantsBuzon = destination === "buzon";
+  const wantsS3 = destination === "s3";
   const isGlobal = selectedDeviceId === GLOBAL_TARGET_ID;
 
-  if (!wantsBuzon && !isGlobal && !selectedDeviceId) {
-    toast("Selecciona primero un dispositivo conectado (o marca 'Guardar en el buzón').", true);
+  if (!wantsBuzon && !wantsS3 && !isGlobal && !selectedDeviceId) {
+    toast("Selecciona primero un dispositivo conectado (o elige Buzón o S3).", true);
     return;
   }
-  if (!wantsBuzon && isGlobal && devices.length === 0) {
+  if (!wantsBuzon && !wantsS3 && isGlobal && devices.length === 0) {
     toast("No hay ningún otro dispositivo conectado ahora mismo.", true);
     return;
   }
   const targetName = isGlobal ? "todos" : (devices.find((d) => d.device_id === selectedDeviceId) || {}).device_name || "";
 
   const { file, isBundle, count } = await packageForSending(items);
+
+  if (wantsS3) {
+    sendItemsToS3(file, isBundle, count, currentS3Folder);
+    return;
+  }
 
   if (wantsBuzon) {
     sendItemsToBuzon(file, isBundle, count, targetName);
@@ -244,6 +300,29 @@ function sendItemsToBuzon(file, isBundle, count, targetName) {
     },
   });
 }
+
+function sendItemsToS3(file, isBundle, count, folder) {
+  const id = "s3_" + Date.now();
+  const folderLabel = folder ? `/${folder}` : "";
+  addTransferRow(id, file.name, isBundle ? `${count} archivos → S3${folderLabel}` : `S3${folderLabel}`);
+  uploadToS3(file, {
+    folder: folder || "",
+    userId: getDeviceId(),
+    isBundle,
+    bundleCount: count,
+    onProgress: (pct) => updateTransferProgress(id, pct),
+    onDone: () => {
+      finishTransferRow(id, "Guardado en S3");
+      toast("Guardado con éxito en tu almacenamiento S3.");
+      if (typeof refreshS3FilesList === "function") refreshS3FilesList();
+    },
+    onError: (status, errMsg) => {
+      finishTransferRow(id, "Error S3");
+      toast(errMsg ? `Error S3: ${errMsg}` : "No se pudo guardar en S3.", true);
+    },
+  });
+}
+
 
 // --- Buzón (para descargar después) --------------------------------------------
 
@@ -382,6 +461,8 @@ document.getElementById("btn-pick-folder").addEventListener("click", (e) => {
   e.stopPropagation();
   folderInput.click();
 });
+setupDestinationSelector();
+
 
 fileInput.addEventListener("change", (e) => {
   if (e.target.files.length) sendItemsToSelected(filesToItems(e.target.files));
@@ -528,3 +609,67 @@ document.getElementById("btn-correo-enviar").onclick = async () => {
     toast("No se pudo enviar automáticamente. Usa 'Abrir en mi correo'.", true);
   }
 };
+
+// --- Almacenamiento S3: Estado en Configuración y Eventos del Explorador ---------
+
+async function refreshS3ConfigStatus() {
+  const badge = document.getElementById("s3-config-badge");
+  const details = document.getElementById("s3-config-details");
+  if (!badge || !details) return;
+
+  badge.textContent = "Verificando…";
+  badge.className = "badge-pill";
+  badge.style.color = "";
+
+  const status = await fetchS3Status(getDeviceId());
+  if (!status.enabled) {
+    badge.textContent = "○ Desactivado";
+    badge.className = "badge-pill";
+    details.innerHTML = `
+      <p class="empty-hint" style="padding:0; margin-top:8px;">
+        El almacenamiento S3 está desactivado en la configuración del servidor (<code>ENLACE_S3_ENABLED=0</code>).
+      </p>
+    `;
+    return;
+  }
+
+  if (status.connected) {
+    badge.textContent = "● Conectado";
+    badge.className = "badge-pill";
+    badge.style.color = "var(--green)";
+    details.innerHTML = `
+      <div style="margin-top:8px; font-size:13px; line-height:1.7;">
+        <div><strong>Bucket:</strong> <code style="font-family:var(--mono);">${escapeHtml(status.bucket || "—")}</code></div>
+        <div><strong>Región:</strong> <code style="font-family:var(--mono);">${escapeHtml(status.region || "us-east-1")}</code></div>
+        <div><strong>Endpoint:</strong> <code style="font-family:var(--mono);">${escapeHtml(status.endpoint_url || "AWS S3 Estándar")}</code></div>
+        <div><strong>Prefijo privado:</strong> <code style="font-family:var(--mono);">${escapeHtml(status.user_prefix || "users/" + getDeviceId() + "/")}</code></div>
+      </div>
+    `;
+  } else {
+    badge.textContent = "⚠️ Error de conexión";
+    badge.className = "badge-pill";
+    badge.style.color = "var(--red)";
+    details.innerHTML = `
+      <div style="margin-top:8px; font-size:13px;">
+        <span style="color:var(--red); font-weight:600;">No se pudo verificar el bucket:</span>
+        <p style="margin:4px 0 0 0; font-family:var(--mono); font-size:12px; color:var(--text-muted);">${escapeHtml(status.error || "Error de credenciales o de red")}</p>
+      </div>
+    `;
+  }
+}
+
+const btnTestS3 = document.getElementById("btn-s3-test-conn");
+if (btnTestS3) {
+  btnTestS3.onclick = () => {
+    toast("Comprobando conexión con S3…");
+    refreshS3ConfigStatus();
+  };
+}
+
+if (typeof setupS3ExplorerEvents === "function") {
+  setupS3ExplorerEvents({
+    getUserId: getDeviceId,
+    toast: toast
+  });
+}
+

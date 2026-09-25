@@ -1,0 +1,11 @@
+app_name: filedrop
+port: 41823
+dockerfile: Dockerfile
+services:
+  - name: web
+    container: enlace
+    port: 41823
+    subdomain: filedrop
+    homepage: true
+    icon: mdi-file-transfer
+    description: "Transferencia de archivos P2P, buzón temporal, sincronización y almacenamiento en nube S3"

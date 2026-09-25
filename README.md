@@ -224,6 +224,40 @@ arrancar el servidor, por ejemplo `ENLACE_BUZON_HORAS=24 python3 server.py`
 para que dure un día). También se puede borrar a mano en cualquier momento
 con el botón "Borrar".
 
+## Almacenamiento en la Nube S3 (AWS, MinIO, Cloudflare R2, Wasabi)
+
+Además de enviar archivos directamente a otro dispositivo conectado o al buzón temporal local, Enlace permite **guardar archivos permanentemente en almacenamiento compatible con Amazon S3**, organizarlos en subcarpetas y gestionarlos desde un explorador integrado tanto en PC como en móviles.
+
+### Características del módulo S3
+- **Aislamiento por usuario/dispositivo**: Cada usuario cuenta con un espacio raíz aislado (`users/<user_id>/`) dentro del bucket dedicado de la aplicación.
+- **Subcarpetas jerárquicas**: Creación de carpetas y subcarpetas ilimitadas para ordenar tus documentos, fotos y respaldos.
+- **Explorador web integrado**:
+  - Navegación por migas de pan (*breadcrumbs*).
+  - Filtrado y búsqueda interactiva por nombre en tiempo real.
+  - Previsualización rápida (*modal preview*) de imágenes, audios, videos y archivos de texto.
+  - Descarga directa y eliminación segura (de archivos o carpetas completas).
+  - Generación de enlaces prefirmados temporales para compartir archivos con terceros.
+- **Compatibilidad amplia**: Funciona con **AWS S3**, **Cloudflare R2**, **MinIO**, **Wasabi**, **Backblaze B2** y emuladores locales como **LocalStack**.
+
+### Variables de configuración (.env)
+```env
+ENLACE_S3_ENABLED=1
+ENLACE_S3_ENDPOINT_URL=               # Opcional (ej: https://<account_id>.r2.cloudflarestorage.com o http://minio:9000)
+ENLACE_S3_REGION=us-east-1
+ENLACE_S3_BUCKET=enlace-cloud-storage
+ENLACE_S3_ACCESS_KEY=TU_ACCESS_KEY
+ENLACE_S3_SECRET_KEY=TU_SECRET_KEY
+ENLACE_S3_PREFIX=users/
+ENLACE_S3_AUTO_CREATE_BUCKET=1
+```
+
+> 📖 **Documentación Completa**: Consulta la documentación exhaustiva en la carpeta [`docs/`](docs/README.md):
+> - [Guía de Almacenamiento S3 y Proveedores](docs/s3-storage.md)
+> - [Referencia de Endpoints de la API REST (en inglés)](docs/api-reference.md)
+> - [Arquitectura del Sistema](docs/architecture.md)
+> - [Guía de Configuración General](docs/configuration.md)
+
+
 ## Compartir la contraseña y las direcciones por correo
 
 Como el puerto y (si expones el servidor) la dirección pública cambian cada
@@ -308,6 +342,10 @@ vez que arrancas Enlace, hay un panel en la pantalla de la anfitriona
 - **Buzón**: una forma de mandar un archivo sin que el otro tenga que estar
   conectado en ese momento; queda guardado en el servidor un tiempo
   (configurable) para que lo descarguen después.
+- **Almacenamiento en la Nube S3**: Guarda archivos permanentemente en la nube
+  (AWS S3, MinIO, Cloudflare R2, Wasabi), con aislamiento por usuario, creación
+  de subcarpetas jerárquicas, explorador web con migas de pan, previsualización,
+  descarga y enlaces prefirmados temporales para compartir.
 - **Compartir acceso por correo**: manda la dirección y la contraseña de la
   sesión actual a alguien de otra red, con un botón que abre tu propio
   correo (sin configurar nada) o, si lo configuras, uno que lo envía solo.

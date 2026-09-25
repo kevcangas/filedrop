@@ -41,6 +41,14 @@ services:
       ENLACE_PORT: "${ENLACE_PORT:-41823}"
       ENLACE_PASSWORD: "${ENLACE_PASSWORD:-}"
       ENLACE_HOST_IP: "${ENLACE_HOST_IP:-}"
+      ENLACE_S3_ENABLED: "${ENLACE_S3_ENABLED:-0}"
+      ENLACE_S3_ENDPOINT_URL: "${ENLACE_S3_ENDPOINT_URL:-}"
+      ENLACE_S3_REGION: "${ENLACE_S3_REGION:-us-east-1}"
+      ENLACE_S3_BUCKET: "${ENLACE_S3_BUCKET:-filedrop-storage}"
+      ENLACE_S3_ACCESS_KEY: "${ENLACE_S3_ACCESS_KEY:-}"
+      ENLACE_S3_SECRET_KEY: "${ENLACE_S3_SECRET_KEY:-}"
+      ENLACE_S3_PREFIX: "${ENLACE_S3_PREFIX:-users/}"
+      ENLACE_S3_AUTO_CREATE_BUCKET: "${ENLACE_S3_AUTO_CREATE_BUCKET:-1}"
     ports:
       # host:contenedor -> cambia el numero de la izquierda si quieres
       # publicarlo en otro puerto del host; el de la derecha debe

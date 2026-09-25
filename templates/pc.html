@@ -39,8 +39,10 @@
 <!-- ── selector de pestaña: lo que se usa a diario vs. configuración ocasional ── -->
 <div class="page-tabs">
   <button type="button" class="primary" id="tab-btn-transferir">📤 Transferir</button>
+  <button type="button" id="tab-btn-s3">☁️ Almacenamiento S3</button>
   <button type="button" id="tab-btn-config">⚙️ Configuración</button>
 </div>
+
 
 <!-- ══════════════════ PESTAÑA: TRANSFERIR (lo de todos los días) ══════════════════ -->
 <div class="grid" id="tab-transferir">
@@ -84,14 +86,34 @@
         <input type="file" id="file-input" multiple style="display:none;">
         <input type="file" id="folder-input" webkitdirectory style="display:none;">
       </div>
-      <div class="row" style="margin-top:10px; justify-content:space-between;">
-        <label style="display:flex; align-items:center; gap:6px; text-transform:none; letter-spacing:normal; font-size:13px; color:var(--text);">
-          <input type="checkbox" id="chk-buzon" style="width:auto;">
-          Guardar en el buzón (para descargar después)
-        </label>
-        <button id="btn-pick-folder">Elegir una carpeta completa</button>
+      <div class="dest-selector-box" style="margin-top:12px; padding:10px 12px; background:var(--panel-2); border:1px solid var(--border); border-radius:var(--radius);">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <span style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted);">Destino del archivo:</span>
+          <button id="btn-pick-folder" style="padding:4px 10px; font-size:12px;">Elegir una carpeta completa</button>
+        </div>
+        <div class="row" style="gap:14px; flex-wrap:wrap; font-size:13px;">
+          <label style="display:flex; align-items:center; gap:6px; cursor:pointer; text-transform:none; letter-spacing:normal; margin:0;">
+            <input type="radio" name="dest-target" id="dest-device" value="device" checked style="width:auto; margin:0;">
+            <span>📱 Dispositivo</span>
+          </label>
+          <label style="display:flex; align-items:center; gap:6px; cursor:pointer; text-transform:none; letter-spacing:normal; margin:0;">
+            <input type="radio" name="dest-target" id="dest-buzon" value="buzon" style="width:auto; margin:0;">
+            <span>📥 Buzón temporal</span>
+          </label>
+          <label id="lbl-dest-s3" style="display:flex; align-items:center; gap:6px; cursor:pointer; text-transform:none; letter-spacing:normal; margin:0;">
+            <input type="radio" name="dest-target" id="dest-s3" value="s3" style="width:auto; margin:0;">
+            <span>☁️ Almacenar en S3</span>
+          </label>
+        </div>
+        <div id="s3-target-hint" style="display:none; margin-top:8px; font-size:12px; color:var(--accent-2); align-items:center; gap:6px;">
+          <span>📁 Carpeta activa en S3:</span>
+          <code id="s3-current-target-folder" style="font-family:var(--mono); background:rgba(0,0,0,0.3); padding:2px 6px; border-radius:4px;">(raíz)</code>
+        </div>
       </div>
+      <!-- Checkbox oculto para compatibilidad con funciones previas -->
+      <input type="checkbox" id="chk-buzon" style="display:none;">
     </div>
+
 
     <div class="panel">
       <div class="spread">
@@ -127,8 +149,53 @@
   </div>
 </div>
 
+<!-- ══════════════════ PESTAÑA: ALMACENAMIENTO S3 ══════════════════ -->
+<div class="s3-explorer-panel" id="tab-s3" style="display:none;">
+  <div class="panel">
+    <!-- Header spread -->
+    <div class="spread" style="align-items:center; flex-wrap:wrap; gap:10px;">
+      <div>
+        <p class="panel-title" style="margin-bottom:2px;">☁️ Almacenamiento en la Nube S3</p>
+        <div class="row" style="gap:8px; align-items:center;">
+          <span class="s3-badge" id="s3-user-prefix-badge">users/...</span>
+          <span class="device-meta" id="s3-stats-meta">0 archivos · 0 MB</span>
+        </div>
+      </div>
+      <div class="row" style="gap:8px;">
+        <button id="btn-s3-new-folder">➕ Nueva carpeta</button>
+        <button id="btn-s3-refresh">🔄 Actualizar</button>
+      </div>
+    </div>
+
+    <!-- Barra de búsqueda y migas de pan -->
+    <div style="margin-top:14px;">
+      <input type="text" id="s3-search-input" placeholder="🔍 Filtrar archivos por nombre..." style="width:100%;">
+    </div>
+
+    <!-- Migas de pan (Breadcrumbs) -->
+    <div class="s3-breadcrumbs-bar" id="s3-breadcrumbs">
+      <span class="s3-crumb active" data-folder="">🏠 Inicio</span>
+    </div>
+
+    <!-- Subcarpetas -->
+    <div id="s3-folders-container" style="display:none;">
+      <p style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted); margin:10px 0 6px 0;">Carpetas:</p>
+      <div class="s3-folder-grid" id="s3-folders-list"></div>
+    </div>
+
+    <!-- Archivos -->
+    <div id="s3-files-container">
+      <p style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted); margin:10px 0 6px 0;">Archivos:</p>
+      <div class="stack" id="s3-files-list">
+        <p class="empty-hint">Cargando archivos...</p>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ══════════════════ PESTAÑA: CONFIGURACIÓN (lo ocasional) ══════════════════ -->
 <div class="grid" id="tab-config" style="display:none;">
+
 
   <div class="stack">
     <div class="panel">
@@ -153,6 +220,20 @@
       <div class="row" style="margin-top:10px; justify-content:flex-end;">
         <button id="btn-correo-abrir">Abrir en mi correo</button>
         <button class="primary" id="btn-correo-enviar">Enviar automáticamente</button>
+      </div>
+    </div>
+
+    <!-- ══ PANEL: Estado de Almacenamiento S3 ══ -->
+    <div class="panel" id="panel-s3-config">
+      <div class="spread" style="align-items:center;">
+        <p class="panel-title" style="margin-bottom:0;">☁️ Almacenamiento en la Nube S3</p>
+        <span id="s3-config-badge" class="badge-pill">Verificando…</span>
+      </div>
+      <div id="s3-config-details">
+        <p class="empty-hint" style="padding:0; margin-top:8px;">Cargando estado de conexión...</p>
+      </div>
+      <div class="row" style="margin-top:10px; justify-content:flex-end;">
+        <button id="btn-s3-test-conn" style="font-size:12px; padding:4px 10px;">🔄 Comprobar conexión</button>
       </div>
     </div>
   </div>
@@ -271,6 +352,26 @@
   </div>
 </div>
 
+<!-- Modal de Vista Previa S3 -->
+<div id="s3-preview-modal" class="modal-backdrop" style="display:none;">
+  <div class="modal s3-preview-modal">
+    <div class="spread" style="align-items:center;">
+      <p class="panel-title" id="s3-preview-title" style="margin:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Vista previa</p>
+      <button id="s3-preview-close" style="padding:4px 8px; font-size:14px;">✕</button>
+    </div>
+    <div class="s3-preview-body" id="s3-preview-body">
+      <p class="empty-hint">Cargando...</p>
+    </div>
+    <div class="row" style="justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+      <span class="device-meta" id="s3-preview-meta"></span>
+      <div class="row" style="gap:8px;">
+        <button id="s3-preview-copy-link">🔗 Copiar enlace</button>
+        <button class="primary" id="s3-preview-download">📥 Descargar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script src="/static/socket.io.min.js"></script>
 <script src="/static/jszip.min.js"></script>
 <script src="/static/transfer.js"></script>
@@ -279,25 +380,38 @@
 
 <script>
 /* ══════════════════════════════════════════════════════════════════
-   PESTAÑAS: Transferir (uso diario) / Configuración (ocasional)
+   PESTAÑAS: Transferir / Almacenamiento S3 / Configuración
    ══════════════════════════════════════════════════════════════════ */
 (function pageTabs() {
   var btnTransferir = document.getElementById('tab-btn-transferir');
+  var btnS3         = document.getElementById('tab-btn-s3');
   var btnConfig     = document.getElementById('tab-btn-config');
   var panelTransferir = document.getElementById('tab-transferir');
+  var panelS3         = document.getElementById('tab-s3');
   var panelConfig     = document.getElementById('tab-config');
 
   function setTab(tab) {
-    var esTransferir = tab === 'transferir';
-    btnTransferir.classList.toggle('primary', esTransferir);
-    btnConfig.classList.toggle('primary', !esTransferir);
-    panelTransferir.style.display = esTransferir ? '' : 'none';
-    panelConfig.style.display = esTransferir ? 'none' : '';
+    btnTransferir.classList.toggle('primary', tab === 'transferir');
+    if (btnS3) btnS3.classList.toggle('primary', tab === 's3');
+    btnConfig.classList.toggle('primary', tab === 'config');
+
+    panelTransferir.style.display = (tab === 'transferir') ? '' : 'none';
+    if (panelS3) panelS3.style.display = (tab === 's3') ? '' : 'none';
+    panelConfig.style.display = (tab === 'config') ? '' : 'none';
+
+    if (tab === 's3' && typeof loadS3Explorer === 'function') {
+      loadS3Explorer();
+    }
+    if (tab === 'config' && typeof refreshS3ConfigStatus === 'function') {
+      refreshS3ConfigStatus();
+    }
   }
 
   btnTransferir.addEventListener('click', function () { setTab('transferir'); });
+  if (btnS3) btnS3.addEventListener('click', function () { setTab('s3'); });
   btnConfig.addEventListener('click', function () { setTab('config'); });
 })();
+
 
 /* ══════════════════════════════════════════════════════════════════
    NOTIFICACIONES PERIÓDICAS POR CORREO

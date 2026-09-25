@@ -171,6 +171,9 @@ function connectTo(address, alias) {
     document.getElementById("conn-pulse").className = "pulse live";
     showScreen("connected");
     refreshBuzon();
+    if (typeof loadS3Explorer === "function") {
+      loadS3Explorer({ getUserId: getDeviceId, toast: toast });
+    }
     if (hasActiveTransfers()) {
       toast("Conexión recuperada, retomando transferencia…");
       resumeActiveTransfers(socket);
@@ -348,11 +351,61 @@ const dz = document.getElementById("dropzone");
 const fileInput = document.getElementById("file-input");
 const folderInput = document.getElementById("folder-input");
 
+// Variable global para la subcarpeta de S3 activa
+let currentS3Folder = "";
+
+function getActiveDestination() {
+  const destS3 = document.getElementById("dest-s3");
+  if (destS3 && destS3.checked) return "s3";
+  const destBuzon = document.getElementById("dest-buzon");
+  if (destBuzon && destBuzon.checked) return "buzon";
+  return "device";
+}
+
+function updateS3DestinationHint() {
+  const hintEl = document.getElementById("s3-target-hint");
+  const folderEl = document.getElementById("s3-current-target-folder");
+  if (hintEl) {
+    const isS3 = getActiveDestination() === "s3";
+    hintEl.style.display = isS3 ? "flex" : "none";
+  }
+  if (folderEl) {
+    folderEl.textContent = currentS3Folder ? `/${currentS3Folder}` : "(raíz)";
+  }
+}
+
+function setupDestinationSelector() {
+  const radios = document.querySelectorAll('input[name="dest-target"]');
+  const chkBuzon = document.getElementById("chk-buzon");
+  radios.forEach((r) => {
+    r.addEventListener("change", () => {
+      const dest = getActiveDestination();
+      if (chkBuzon) chkBuzon.checked = (dest === "buzon");
+      updateS3DestinationHint();
+    });
+  });
+
+  fetchS3Status(getDeviceId()).then((status) => {
+    const lblS3 = document.getElementById("lbl-dest-s3");
+    if (lblS3) {
+      if (!status.enabled) {
+        lblS3.title = "S3 desactivado";
+        lblS3.style.opacity = "0.6";
+      } else if (!status.connected) {
+        lblS3.title = "S3 no conectado: " + (status.error || "revisa credenciales");
+      } else {
+        lblS3.title = `S3 activo (Bucket: ${status.bucket})`;
+      }
+    }
+  });
+}
+
 dz.addEventListener("click", () => fileInput.click());
 document.getElementById("btn-pick-folder").addEventListener("click", (e) => {
   e.stopPropagation();
   folderInput.click();
 });
+setupDestinationSelector();
 
 fileInput.addEventListener("change", (e) => {
   if (e.target.files.length) sendItemsToSelected(filesToItems(e.target.files));
@@ -366,20 +419,27 @@ folderInput.addEventListener("change", (e) => {
 async function sendItemsToSelected(items) {
   if (items.length === 0) return;
 
-  const wantsBuzon = document.getElementById("chk-buzon").checked;
+  const destination = getActiveDestination();
+  const wantsBuzon = destination === "buzon";
+  const wantsS3 = destination === "s3";
   const isGlobal = selectedDeviceId === GLOBAL_TARGET_ID;
 
-  if (!wantsBuzon && !isGlobal && (!socket || !selectedDeviceId)) {
-    toast("Selecciona primero un dispositivo conectado (o marca 'Guardar en el buzón').", true);
+  if (!wantsBuzon && !wantsS3 && !isGlobal && (!socket || !selectedDeviceId)) {
+    toast("Selecciona primero un dispositivo conectado (o elige Buzón o S3).", true);
     return;
   }
-  if (!wantsBuzon && isGlobal && devices.length === 0) {
+  if (!wantsBuzon && !wantsS3 && isGlobal && devices.length === 0) {
     toast("No hay ningún otro dispositivo conectado ahora mismo.", true);
     return;
   }
   const targetName = isGlobal ? "todos" : (devices.find((d) => d.device_id === selectedDeviceId) || {}).device_name || "";
 
   const { file, isBundle, count } = await packageForSending(items);
+
+  if (wantsS3) {
+    sendItemsToS3(file, isBundle, count, currentS3Folder);
+    return;
+  }
 
   if (wantsBuzon) {
     sendItemsToBuzon(file, isBundle, count, targetName);
@@ -446,6 +506,29 @@ function sendItemsToBuzon(file, isBundle, count, targetName) {
     },
   });
 }
+
+function sendItemsToS3(file, isBundle, count, folder) {
+  const id = "s3_" + Date.now();
+  const folderLabel = folder ? `/${folder}` : "";
+  addTransferRow(id, file.name, isBundle ? `${count} archivos → S3${folderLabel}` : `S3${folderLabel}`);
+  uploadToS3(file, {
+    folder: folder || "",
+    userId: getDeviceId(),
+    isBundle,
+    bundleCount: count,
+    onProgress: (pct) => updateTransferProgress(id, pct),
+    onDone: () => {
+      finishTransferRow(id, "Guardado en S3");
+      toast("Guardado con éxito en tu almacenamiento S3.");
+      if (typeof refreshS3FilesList === "function") refreshS3FilesList();
+    },
+    onError: (status, errMsg) => {
+      finishTransferRow(id, "Error S3");
+      toast(errMsg ? `Error S3: ${errMsg}` : "No se pudo guardar en S3.", true);
+    },
+  });
+}
+
 
 // --- Buzón (para descargar después) --------------------------------------------
 
@@ -666,3 +749,10 @@ if ("serviceWorker" in navigator) {
 
 renderSaved();
 refreshNotifStatus();
+
+if (typeof setupS3ExplorerEvents === "function") {
+  setupS3ExplorerEvents({
+    getUserId: getDeviceId,
+    toast: toast
+  });
+}

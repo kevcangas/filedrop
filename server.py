@@ -34,10 +34,12 @@ from functools import wraps
 import random
 import string
 import secrets #mejor que random
+import mimetypes
 import webbrowser
 
 from flask import (
     Flask,
+    Response,
     abort,
     jsonify,
     redirect,
@@ -191,6 +193,26 @@ def smtp_configured():
 
 
 # ==============================================================================
+# CONFIGURACIÓN S3 CLOUD STORAGE
+# ==============================================================================
+S3_ENABLED = os.environ.get("ENLACE_S3_ENABLED", "0").strip().lower() in ("1", "true", "yes")
+S3_ENDPOINT_URL = os.environ.get("ENLACE_S3_ENDPOINT_URL", "").strip() or None
+S3_REGION = os.environ.get("ENLACE_S3_REGION", "us-east-1").strip() or "us-east-1"
+S3_BUCKET = os.environ.get("ENLACE_S3_BUCKET", "filedrop-storage").strip() or "filedrop-storage"
+S3_ACCESS_KEY = os.environ.get("ENLACE_S3_ACCESS_KEY", "").strip()
+S3_SECRET_KEY = os.environ.get("ENLACE_S3_SECRET_KEY", "").strip()
+S3_PREFIX = os.environ.get("ENLACE_S3_PREFIX", "users/").strip()
+if S3_PREFIX and not S3_PREFIX.endswith("/"):
+    S3_PREFIX += "/"
+S3_AUTO_CREATE_BUCKET = os.environ.get("ENLACE_S3_AUTO_CREATE_BUCKET", "1").strip().lower() in ("1", "true", "yes")
+
+_s3_client = None
+_s3_lock = threading.Lock()
+_s3_bucket_verified = False
+
+
+# ==============================================================================
+
 # NOTIFICACIONES PERIÓDICAS POR CORREO
 # El usuario las activa desde el panel de login o desde el panel de PC.
 # Manda la contraseña + las URLs de acceso cada N horas mientras esté activo.
@@ -971,6 +993,456 @@ def buzon_borrar(item_id):
         return jsonify({"ok": False}), 404
     remove_mailbox_entry(bucket_id, item_id)
     return jsonify({"ok": True})
+
+
+# ==============================================================================
+# S3 CLOUD STORAGE MODULE & ENDPOINTS
+# ==============================================================================
+
+def get_s3_client():
+    """Devuelve la instancia de boto3 S3 client o (None, error_msg)."""
+    global _s3_client, _s3_bucket_verified
+    if not S3_ENABLED:
+        return None, "S3 storage is disabled (ENLACE_S3_ENABLED=0)."
+
+    with _s3_lock:
+        if _s3_client is not None and _s3_bucket_verified:
+            return _s3_client, None
+
+        try:
+            import boto3
+            from botocore.config import Config
+            from botocore.exceptions import ClientError
+        except ImportError:
+            return None, "boto3 library is not installed in the Python environment."
+
+        client_kwargs = {
+            "service_name": "s3",
+            "region_name": S3_REGION,
+            "config": Config(signature_version="s3v4", s3={"addressing_style": "auto"}),
+        }
+        if S3_ENDPOINT_URL:
+            client_kwargs["endpoint_url"] = S3_ENDPOINT_URL
+        if S3_ACCESS_KEY and S3_SECRET_KEY:
+            client_kwargs["aws_access_key_id"] = S3_ACCESS_KEY
+            client_kwargs["aws_secret_access_key"] = S3_SECRET_KEY
+
+        try:
+            client = boto3.client(**client_kwargs)
+            if not _s3_bucket_verified:
+                try:
+                    client.head_bucket(Bucket=S3_BUCKET)
+                except ClientError as e:
+                    code = str(e.response.get("Error", {}).get("Code", ""))
+                    if code in ("404", "NoSuchBucket") and S3_AUTO_CREATE_BUCKET:
+                        print(f"[S3] Bucket '{S3_BUCKET}' does not exist. Creating it automatically...")
+                        create_kwargs = {"Bucket": S3_BUCKET}
+                        if S3_REGION != "us-east-1" and not S3_ENDPOINT_URL:
+                            create_kwargs["CreateBucketConfiguration"] = {"LocationConstraint": S3_REGION}
+                        client.create_bucket(**create_kwargs)
+                        print(f"[S3] Bucket '{S3_BUCKET}' created successfully.")
+                    else:
+                        raise e
+                _s3_bucket_verified = True
+
+            _s3_client = client
+            return _s3_client, None
+        except Exception as e:
+            return None, f"Failed to connect to S3: {str(e)}"
+
+
+def get_caller_user_id():
+    """Identifica al usuario o dispositivo llamante para aislar su prefijo en S3."""
+    user_id = ""
+    if request.is_json and request.json:
+        user_id = request.json.get("user_id") or request.json.get("device_id") or ""
+    if not user_id:
+        user_id = request.values.get("user_id") or request.values.get("device_id") or ""
+    if not user_id:
+        user_id = request.headers.get("X-User-Id") or request.headers.get("X-Device-Id") or ""
+    if not user_id:
+        user_id = session.get("device_id") or "default_user"
+    clean_id = "".join(c for c in str(user_id) if c.isalnum() or c in ("-", "_")).strip()
+    return clean_id or "default_user"
+
+
+def get_user_s3_root(user_id):
+    """Devuelve el prefijo raíz exclusivo para este usuario (ej: users/device123/)."""
+    safe_user = "".join(c for c in str(user_id) if c.isalnum() or c in ("-", "_")).strip() or "default_user"
+    return f"{S3_PREFIX}{safe_user}/"
+
+
+def sanitize_folder_path(folder_str):
+    """Limpia y normaliza la ruta de subcarpetas (evita '../', '//', etc.)."""
+    if not folder_str:
+        return ""
+    normalized = str(folder_str).replace("\\", "/")
+    segments = [s.strip() for s in normalized.split("/") if s.strip() and s.strip() not in (".", "..")]
+    if not segments:
+        return ""
+    clean_segments = ["".join(c for c in s if c.isalnum() or c in ("-", "_", " ", ".")).strip() for s in segments]
+    clean_segments = [s for s in clean_segments if s]
+    if not clean_segments:
+        return ""
+    return "/".join(clean_segments) + "/"
+
+
+def clean_display_name(key):
+    """Extrae el nombre original del archivo eliminando el prefijo interno <id>__."""
+    basename = key.split("/")[-1]
+    if "__" in basename:
+        parts = basename.split("__", 1)
+        if len(parts[0]) in (8, 16, 32):
+            return parts[1]
+    return basename
+
+
+@app.route("/api/s3/status", methods=["GET"])
+def s3_status():
+    """Devuelve el estado de conexión del módulo S3 y la información del bucket."""
+    user_id = get_caller_user_id()
+    user_root = get_user_s3_root(user_id)
+
+    if not S3_ENABLED:
+        return jsonify({
+            "ok": True,
+            "enabled": False,
+            "connected": False,
+            "bucket": S3_BUCKET,
+            "region": S3_REGION,
+            "user_id": user_id,
+            "user_prefix": user_root,
+            "error": "S3 storage is disabled (ENLACE_S3_ENABLED=0).",
+        })
+
+    client, err = get_s3_client()
+    return jsonify({
+        "ok": True,
+        "enabled": S3_ENABLED,
+        "connected": client is not None,
+        "bucket": S3_BUCKET,
+        "region": S3_REGION,
+        "user_id": user_id,
+        "user_prefix": user_root,
+        "error": err,
+    })
+
+
+@app.route("/api/s3/upload", methods=["POST"])
+def s3_upload():
+    """Sube un archivo directamente a S3 dentro del prefijo y subcarpeta del usuario."""
+    client, err = get_s3_client()
+    if not client:
+        return jsonify({"ok": False, "error": err}), 400
+
+    if "file" not in request.files:
+        return jsonify({"ok": False, "error": "No file provided in form-data."}), 400
+
+    f = request.files["file"]
+    if not f.filename:
+        return jsonify({"ok": False, "error": "Empty filename."}), 400
+
+    user_id = get_caller_user_id()
+    folder_raw = request.form.get("folder") or request.form.get("subprefix") or ""
+    folder_clean = sanitize_folder_path(folder_raw)
+
+    safe_name = os.path.basename(f.filename)
+    item_id = uuid.uuid4().hex[:8]
+    stored_name = f"{item_id}__{safe_name}"
+
+    user_root = get_user_s3_root(user_id)
+    s3_key = f"{user_root}{folder_clean}{stored_name}"
+
+    content_type = f.mimetype or mimetypes.guess_type(safe_name)[0] or "application/octet-stream"
+
+    try:
+        f.seek(0, os.SEEK_END)
+        size = f.tell()
+        f.seek(0)
+    except Exception:
+        size = 0
+
+    extra_args = {
+        "ContentType": content_type,
+        "Metadata": {
+            "original-name": safe_name,
+            "uploader-id": user_id,
+            "timestamp": str(int(time.time())),
+        },
+    }
+
+    try:
+        client.upload_fileobj(f, S3_BUCKET, s3_key, ExtraArgs=extra_args)
+        return jsonify({
+            "ok": True,
+            "key": s3_key,
+            "name": safe_name,
+            "size": size,
+            "folder": folder_clean,
+            "user_id": user_id,
+            "mimetype": content_type,
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Upload to S3 failed: {str(e)}"}), 500
+
+
+@app.route("/api/s3/files", methods=["GET"])
+def s3_files():
+    """Lista las subcarpetas inmediatas y los archivos dentro del prefijo del usuario."""
+    client, err = get_s3_client()
+    if not client:
+        return jsonify({"ok": False, "error": err}), 400
+
+    user_id = get_caller_user_id()
+    user_root = get_user_s3_root(user_id)
+
+    folder_raw = request.args.get("folder") or request.args.get("subprefix") or ""
+    folder_clean = sanitize_folder_path(folder_raw)
+    current_prefix = f"{user_root}{folder_clean}"
+
+    delimiter = request.args.get("delimiter", "/")
+
+    try:
+        paginator = client.get_paginator("list_objects_v2")
+        iterator = paginator.paginate(
+            Bucket=S3_BUCKET,
+            Prefix=current_prefix,
+            Delimiter=delimiter if delimiter else "/",
+        )
+
+        folders = []
+        files = []
+
+        for page in iterator:
+            for cp in page.get("CommonPrefixes", []):
+                cp_prefix = cp.get("Prefix", "")
+                if cp_prefix.startswith(current_prefix):
+                    rel = cp_prefix[len(current_prefix):].rstrip("/")
+                    if rel and "/" not in rel:
+                        folders.append({
+                            "name": rel,
+                            "path": f"{folder_clean}{rel}/",
+                            "full_prefix": cp_prefix,
+                        })
+
+            for obj in page.get("Contents", []):
+                k = obj.get("Key", "")
+                if k == current_prefix or k.endswith("/"):
+                    continue
+
+                size = obj.get("Size", 0)
+                last_mod = obj.get("LastModified")
+                last_mod_str = last_mod.isoformat() if hasattr(last_mod, "isoformat") else str(last_mod)
+                last_mod_ts = last_mod.timestamp() if hasattr(last_mod, "timestamp") else time.time()
+
+                disp_name = clean_display_name(k)
+                mimetype = mimetypes.guess_type(disp_name)[0] or "application/octet-stream"
+
+                files.append({
+                    "key": k,
+                    "name": disp_name,
+                    "size": size,
+                    "last_modified": last_mod_str,
+                    "timestamp": last_mod_ts,
+                    "mimetype": mimetype,
+                    "folder": folder_clean,
+                })
+
+        folders.sort(key=lambda x: x["name"].lower())
+        files.sort(key=lambda x: x["timestamp"], reverse=True)
+
+        return jsonify({
+            "ok": True,
+            "bucket": S3_BUCKET,
+            "user_id": user_id,
+            "user_prefix": user_root,
+            "current_folder": folder_clean,
+            "folders": folders,
+            "files": files,
+            "total_files": len(files),
+            "total_size": sum(f["size"] for f in files),
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Failed to list S3 objects: {str(e)}"}), 500
+
+
+@app.route("/api/s3/folders/create", methods=["POST"])
+def s3_folders_create():
+    """Crea un marcador de carpeta virtual dentro del espacio del usuario."""
+    client, err = get_s3_client()
+    if not client:
+        return jsonify({"ok": False, "error": err}), 400
+
+    data = request.get_json(silent=True) or request.form
+    raw_path = data.get("path") or ""
+    clean_path = sanitize_folder_path(raw_path)
+    if not clean_path:
+        return jsonify({"ok": False, "error": "Invalid or empty folder path."}), 400
+
+    user_id = get_caller_user_id()
+    user_root = get_user_s3_root(user_id)
+    folder_key = f"{user_root}{clean_path}"
+
+    try:
+        client.put_object(
+            Bucket=S3_BUCKET,
+            Key=folder_key,
+            Body=b"",
+            ContentType="application/x-directory",
+        )
+        return jsonify({"ok": True, "path": clean_path, "key": folder_key})
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Failed to create folder: {str(e)}"}), 500
+
+
+@app.route("/api/s3/folders/delete", methods=["POST"])
+def s3_folders_delete():
+    """Elimina una subcarpeta y todos los objetos contenidos bajo ella."""
+    client, err = get_s3_client()
+    if not client:
+        return jsonify({"ok": False, "error": err}), 400
+
+    data = request.get_json(silent=True) or request.form
+    raw_path = data.get("path") or ""
+    clean_path = sanitize_folder_path(raw_path)
+    if not clean_path:
+        return jsonify({"ok": False, "error": "Invalid or empty folder path."}), 400
+
+    user_id = get_caller_user_id()
+    user_root = get_user_s3_root(user_id)
+    target_prefix = f"{user_root}{clean_path}"
+
+    try:
+        paginator = client.get_paginator("list_objects_v2")
+        deleted_count = 0
+        for page in paginator.paginate(Bucket=S3_BUCKET, Prefix=target_prefix):
+            objects_to_delete = [{"Key": obj["Key"]} for obj in page.get("Contents", [])]
+            if objects_to_delete:
+                client.delete_objects(
+                    Bucket=S3_BUCKET,
+                    Delete={"Objects": objects_to_delete, "Quiet": True},
+                )
+                deleted_count += len(objects_to_delete)
+
+        return jsonify({"ok": True, "path": clean_path, "deleted_count": deleted_count})
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Failed to delete folder: {str(e)}"}), 500
+
+
+@app.route("/api/s3/download/<path:key>", methods=["GET"])
+def s3_download(key):
+    """Descarga un objeto validando que pertenezca al usuario (stream o redirección presigned)."""
+    client, err = get_s3_client()
+    if not client:
+        abort(404)
+
+    user_id = get_caller_user_id()
+    user_root = get_user_s3_root(user_id)
+
+    if not key.startswith(user_root):
+        abort(403)
+
+    filename = clean_display_name(key)
+    disposition = f'attachment; filename="{filename}"'
+
+    if request.args.get("stream") == "1":
+        try:
+            s3_obj = client.get_object(Bucket=S3_BUCKET, Key=key)
+            mimetype = s3_obj.get("ContentType") or mimetypes.guess_type(filename)[0] or "application/octet-stream"
+            response = Response(s3_obj["Body"].iter_chunks(chunk_size=128 * 1024), mimetype=mimetype)
+            response.headers["Content-Disposition"] = disposition
+            if "ContentLength" in s3_obj:
+                response.headers["Content-Length"] = str(s3_obj["ContentLength"])
+            return response
+        except Exception:
+            abort(404)
+
+    try:
+        presigned_url = client.generate_presigned_url(
+            ClientMethod="get_object",
+            Params={
+                "Bucket": S3_BUCKET,
+                "Key": key,
+                "ResponseContentDisposition": disposition,
+            },
+            ExpiresIn=300,
+        )
+        return redirect(presigned_url)
+    except Exception:
+        try:
+            s3_obj = client.get_object(Bucket=S3_BUCKET, Key=key)
+            mimetype = s3_obj.get("ContentType") or mimetypes.guess_type(filename)[0] or "application/octet-stream"
+            response = Response(s3_obj["Body"].iter_chunks(chunk_size=128 * 1024), mimetype=mimetype)
+            response.headers["Content-Disposition"] = disposition
+            return response
+        except Exception:
+            abort(404)
+
+
+@app.route("/api/s3/share/<path:key>", methods=["GET"])
+def s3_share(key):
+    """Genera una URL prefirmada temporal para compartir el archivo externamente."""
+    client, err = get_s3_client()
+    if not client:
+        return jsonify({"ok": False, "error": err}), 400
+
+    user_id = get_caller_user_id()
+    user_root = get_user_s3_root(user_id)
+
+    if not key.startswith(user_root):
+        return jsonify({"ok": False, "error": "Access denied."}), 403
+
+    try:
+        expires_in = int(request.args.get("expires_in", "3600") or 3600)
+        expires_in = max(60, min(expires_in, 7 * 86400))
+    except ValueError:
+        expires_in = 3600
+
+    filename = clean_display_name(key)
+    try:
+        presigned_url = client.generate_presigned_url(
+            ClientMethod="get_object",
+            Params={
+                "Bucket": S3_BUCKET,
+                "Key": key,
+                "ResponseContentDisposition": f'inline; filename="{filename}"',
+            },
+            ExpiresIn=expires_in,
+        )
+        return jsonify({
+            "ok": True,
+            "url": presigned_url,
+            "expires_in": expires_in,
+            "filename": filename,
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Failed to generate share URL: {str(e)}"}), 500
+
+
+@app.route("/api/s3/delete", methods=["POST"])
+def s3_delete():
+    """Elimina un objeto individual de S3 dentro del prefijo del usuario."""
+    client, err = get_s3_client()
+    if not client:
+        return jsonify({"ok": False, "error": err}), 400
+
+    data = request.get_json(silent=True) or request.form
+    key = data.get("key") or ""
+    if not key:
+        return jsonify({"ok": False, "error": "Missing key parameter."}), 400
+
+    user_id = get_caller_user_id()
+    user_root = get_user_s3_root(user_id)
+
+    if not key.startswith(user_root):
+        return jsonify({"ok": False, "error": "Access denied."}), 403
+
+    try:
+        client.delete_object(Bucket=S3_BUCKET, Key=key)
+        return jsonify({"ok": True, "key": key})
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Failed to delete S3 object: {str(e)}"}), 500
+
 
 
 # --- Eventos Socket.IO: conexion y registro de dispositivos ------------------
