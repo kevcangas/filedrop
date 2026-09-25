@@ -29,9 +29,8 @@
 
 <div class="brand spread" style="max-width:1000px; margin-left:auto; margin-right:auto;">
   <div class="row">
-    <span class="brand-mark">ENLACE</span>
-    <span class="brand-sub">panel de computadora anfitriona</span>
-    <span class="role-pill">Anfitrión</span>
+    <span class="brand-mark">FILEDROP</span>
+    <span class="brand-sub">transferencia directa y almacenamiento S3</span>
   </div>
   <a href="/logout" class="device-meta">cerrar sesión</a>
 </div>
@@ -47,36 +46,32 @@
 <!-- ══════════════════ PESTAÑA: TRANSFERIR (lo de todos los días) ══════════════════ -->
 <div class="grid" id="tab-transferir">
 
-  <!-- Columna izquierda: identidad de la PC + dispositivos -->
+  <!-- Columna izquierda: dispositivos y portapapeles compartido -->
   <div class="stack">
-    <div class="panel">
-      <p class="panel-title">Esta computadora</p>
-      <div class="readout">
-        <div>
-          <div class="readout-label">Dirección para conectar otros dispositivos</div>
-          <div class="readout-value" id="ip-value">{{ local_ip }}:{{ port }}</div>
-        </div>
-        <button id="copy-ip">Copiar</button>
-      </div>
-      <p class="empty-hint" style="margin-top:10px;">
-        Celular: abre <span style="font-family:var(--mono)">http://{{ local_ip }}:{{ port }}/mobile</span><br>
-        Otra computadora: abre <span style="font-family:var(--mono)">http://{{ local_ip }}:{{ port }}/desktop</span><br>
-        (misma red WiFi en ambos casos — el puerto cambia cada vez que arrancas el servidor)
-      </p>
-    </div>
-
     <div class="panel">
       <p class="panel-title">Dispositivos conectados</p>
       <p class="empty-hint" style="padding:0 0 8px 0;">
-        Estos son los celulares y computadoras que se anexaron para transferir. Esta computadora (la que corre el programa) no aparece en su propia lista.
+        Selecciona un dispositivo para enviarle archivos o elige "Global" para enviar a todos a la vez.
       </p>
       <div id="device-list" class="stack">
         <p class="empty-hint">Ningún otro dispositivo conectado todavía.</p>
       </div>
     </div>
+
+    <div class="panel">
+      <div class="spread">
+        <p class="panel-title" style="margin-bottom:0;">Portapapeles compartido</p>
+        <span class="device-meta" id="clipboard-from"></span>
+      </div>
+      <textarea id="clipboard-text" rows="3" placeholder="Aquí aparece lo último compartido, o escribe/pega algo para enviarlo…"></textarea>
+      <div class="row" style="margin-top:10px; justify-content:flex-end;">
+        <button id="btn-clipboard-copy">Copiar a mi portapapeles</button>
+        <button class="primary" id="btn-clipboard-send">Enviar portapapeles</button>
+      </div>
+    </div>
   </div>
 
-  <!-- Columna derecha: envío, portapapeles y transferencias -->
+  <!-- Columna derecha: envío, transferencias y buzón -->
   <div class="stack">
     <div class="panel">
       <p class="panel-title">Enviar archivo</p>
@@ -114,6 +109,12 @@
       <input type="checkbox" id="chk-buzon" style="display:none;">
     </div>
 
+    <div class="panel">
+      <p class="panel-title">Transferencias</p>
+      <div id="transfers" class="stack">
+        <p class="empty-hint">Sin actividad todavía.</p>
+      </div>
+    </div>
 
     <div class="panel">
       <div class="spread">
@@ -125,25 +126,6 @@
       </p>
       <div id="buzon-list" class="stack">
         <p class="empty-hint">Nada en el buzón todavía.</p>
-      </div>
-    </div>
-
-    <div class="panel">
-      <div class="spread">
-        <p class="panel-title" style="margin-bottom:0;">Portapapeles compartido</p>
-        <span class="device-meta" id="clipboard-from"></span>
-      </div>
-      <textarea id="clipboard-text" rows="3" placeholder="Aquí aparece lo último compartido, o escribe/pega algo para enviarlo…"></textarea>
-      <div class="row" style="margin-top:10px; justify-content:flex-end;">
-        <button id="btn-clipboard-copy">Copiar a mi portapapeles</button>
-        <button class="primary" id="btn-clipboard-send">Enviar portapapeles</button>
-      </div>
-    </div>
-
-    <div class="panel">
-      <p class="panel-title">Transferencias</p>
-      <div id="transfers" class="stack">
-        <p class="empty-hint">Sin actividad todavía.</p>
       </div>
     </div>
   </div>
@@ -372,11 +354,11 @@
   </div>
 </div>
 
-<script src="/static/socket.io.min.js"></script>
-<script src="/static/jszip.min.js"></script>
-<script src="/static/transfer.js"></script>
-<script src="/static/notifications.js"></script>
-<script src="/static/pc.js"></script>
+<script src="/static/socket.io.min.js?v=4"></script>
+<script src="/static/jszip.min.js?v=4"></script>
+<script src="/static/transfer.js?v=4"></script>
+<script src="/static/notifications.js?v=4"></script>
+<script src="/static/pc.js?v=4"></script>
 
 <script>
 /* ══════════════════════════════════════════════════════════════════

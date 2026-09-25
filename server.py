@@ -630,6 +630,9 @@ def logout():
 # --- Rutas HTTP --------------------------------------------------------------
 
 @app.route("/")
+@app.route("/desktop")
+@app.route("/pc")
+@app.route("/host")
 def pc_interface():
     ua = request.headers.get("User-Agent", "").lower()
     is_mobile = any(m in ua for m in ("iphone", "android", "ipad", "mobile"))
@@ -638,20 +641,9 @@ def pc_interface():
     return render_template("pc.html", local_ip=get_local_ip(), port=PORT)
 
 
-@app.route("/host")
-@app.route("/pc")
-def host_interface():
-    return render_template("pc.html", local_ip=get_local_ip(), port=PORT)
-
-
 @app.route("/mobile")
 def phone_interface():
     return render_template("remote.html", local_ip=get_local_ip(), port=PORT, default_type="phone")
-
-
-@app.route("/desktop")
-def desktop_interface():
-    return render_template("remote.html", local_ip=get_local_ip(), port=PORT, default_type="pc")
 
 
 @app.route("/api/info")

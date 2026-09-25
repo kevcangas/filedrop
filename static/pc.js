@@ -11,7 +11,14 @@ function getDeviceId() {
 }
 
 function getDeviceName() {
-  return localStorage.getItem(DEVICE_NAME_KEY) || "Esta computadora";
+  const stored = localStorage.getItem(DEVICE_NAME_KEY);
+  if (stored && stored !== "Esta computadora") return stored;
+  const ua = navigator.userAgent;
+  let name = "PC";
+  if (/Mac/i.test(ua)) name = "Mac";
+  else if (/Windows/i.test(ua)) name = "PC Windows";
+  else if (/Linux/i.test(ua)) name = "PC Linux";
+  return name;
 }
 
 const socket = io();
@@ -80,10 +87,9 @@ function renderDevices() {
       <span class="pulse live"></span>
       <div>
         <div class="device-name">
-          ${deviceIcon(d.device_type, d.is_host)} ${escapeHtml(d.device_name)}
-          ${d.is_host ? '<span class="host-badge">Anfitriona</span>' : ""}
+          ${deviceIcon(d.device_type, false)} ${escapeHtml(d.device_name)}
         </div>
-        <div class="device-meta">${d.is_host ? "esta computadora (servidor)" : "conectado para transferir"} · ${d.device_id.slice(0, 8)}</div>
+        <div class="device-meta">conectado para transferir · ${d.device_id.slice(0, 8)}</div>
       </div>`;
     row.onclick = () => { selectedDeviceId = d.device_id; renderDevices(); };
     row.onkeydown = (ev) => {
@@ -135,7 +141,7 @@ function finishTransferRow(id, label) {
 // --- Registro con el servidor -------------------------------------------------
 
 socket.on("connect", () => {
-  socket.emit("register_device", { device_id: getDeviceId(), device_name: getDeviceName(), device_type: "pc", is_host: true });
+  socket.emit("register_device", { device_id: getDeviceId(), device_name: getDeviceName(), device_type: "pc", is_host: false });
   if (hasActiveTransfers()) {
     toast("Conexión recuperada, retomando transferencias en curso…");
     resumeActiveTransfers(socket);
@@ -484,12 +490,15 @@ dz.addEventListener("drop", async (e) => {
   sendItemsToSelected(items);
 });
 
-// --- Copiar IP -------------------------------------------------------------------
+// --- Copiar IP (si existe el botón en la plantilla) -------------------------------
 
-document.getElementById("copy-ip").onclick = () => {
-  const text = document.getElementById("ip-value").textContent;
-  navigator.clipboard.writeText(text).then(() => toast("Dirección copiada."));
-};
+const btnCopyIp = document.getElementById("copy-ip");
+if (btnCopyIp) {
+  btnCopyIp.onclick = () => {
+    const el = document.getElementById("ip-value");
+    if (el) navigator.clipboard.writeText(el.textContent).then(() => toast("Dirección copiada."));
+  };
+}
 
 // --- Portapapeles compartido ------------------------------------------------------
 
