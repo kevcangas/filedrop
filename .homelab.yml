@@ -1,6 +1,6 @@
 app_name: filedrop
 services:
-  - name: web
+  - name: filedrop
     container: enlace
     port: 41823
     subdomain: filedrop
