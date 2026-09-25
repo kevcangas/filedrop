@@ -1,33 +1,3 @@
-# Enlace - contenedor con IP fija
-# ------------------------------------------------------------------
-# Esto crea una red Docker propia ("enlace_red") y le asigna al
-# contenedor SIEMPRE la misma IP dentro de ella (172.28.0.10 en este
-# ejemplo), en vez de una que Docker elija distinta cada vez.
-#
-# Ojo con lo que significa esa IP fija:
-#   - Es fija DENTRO de la red interna de Docker (172.28.0.0/24), no una
-#     IP de tu red WiFi/LAN real. Sirve para que otros contenedores, o
-#     scripts que apunten a "172.28.0.10", siempre encuentren a Enlace
-#     en el mismo lugar aunque el contenedor se reinicie o se reconstruya.
-#   - Para que los celulares/otras PCs de tu casa (fuera de Docker) se
-#     conecten, igual necesitas publicar el puerto al host con "ports:"
-#     (ya viene abajo) y usar la IP real del host en tu LAN -no la
-#     172.28.0.10-. Define ENLACE_HOST_IP con esa IP del host para que
-#     Enlace la muestre correctamente en pantalla (ver mas abajo).
-#   - Si lo que quieres es que el HOST (la maquina que corre Docker)
-#     tenga siempre la misma IP en tu router, eso se configura en el
-#     router (reserva DHCP) o en la red del sistema operativo, no aqui:
-#     Docker no puede fijar la IP de tu LAN real, solo la de sus propias
-#     redes internas.
-#
-# Arrancar:
-#   docker compose up -d
-# Ver la clave de acceso generada (si no definiste ENLACE_PASSWORD):
-#   docker compose logs enlace | grep "Clave de acceso"
-# Parar:
-#   docker compose down
-# ------------------------------------------------------------------
-
 services:
   enlace:
     build: .
@@ -36,8 +6,6 @@ services:
     env_file:
       - .env
     environment:
-      # Se cargan las variables desde .env (o variables de entorno del sistema).
-      # Si se dejan vacias, Enlace usara sus valores por defecto seguros.
       ENLACE_PORT: "${ENLACE_PORT:-41823}"
       ENLACE_PASSWORD: "${ENLACE_PASSWORD:-}"
       ENLACE_HOST_IP: "${ENLACE_HOST_IP:-}"
@@ -50,24 +18,17 @@ services:
       ENLACE_S3_PREFIX: "${ENLACE_S3_PREFIX:-users/}"
       ENLACE_S3_AUTO_CREATE_BUCKET: "${ENLACE_S3_AUTO_CREATE_BUCKET:-1}"
     ports:
-      # host:contenedor -> cambia el numero de la izquierda si quieres
-      # publicarlo en otro puerto del host; el de la derecha debe
-      # coincidir con ENLACE_PORT de arriba.
       - "41823:41823"
     volumes:
       - enlace_uploads:/app/uploads
       - enlace_buzon:/app/buzon
     networks:
-      enlace_red:
-        ipv4_address: 172.28.0.10
-
-networks:
-  enlace_red:
-    driver: bridge
-    ipam:
-      config:
-        - subnet: 172.28.0.0/24
+      - default
 
 volumes:
   enlace_uploads:
   enlace_buzon:
+
+networks:
+  default:
+    driver: bridge
