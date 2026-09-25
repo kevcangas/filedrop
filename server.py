@@ -197,6 +197,14 @@ def smtp_configured():
 # ==============================================================================
 S3_ENABLED = os.environ.get("ENLACE_S3_ENABLED", "0").strip().lower() in ("1", "true", "yes")
 S3_ENDPOINT_URL = os.environ.get("ENLACE_S3_ENDPOINT_URL", "").strip() or None
+if S3_ENDPOINT_URL and not (S3_ENDPOINT_URL.startswith("http://") or S3_ENDPOINT_URL.startswith("https://")):
+    S3_ENDPOINT_URL = "http://" + S3_ENDPOINT_URL
+if S3_ENDPOINT_URL and ("localhost:9000" in S3_ENDPOINT_URL or "127.0.0.1:9000" in S3_ENDPOINT_URL):
+    try:
+        socket.gethostbyname("app-minio")
+        S3_ENDPOINT_URL = S3_ENDPOINT_URL.replace("localhost:9000", "app-minio:9000").replace("127.0.0.1:9000", "app-minio:9000")
+    except Exception:
+        pass
 S3_REGION = os.environ.get("ENLACE_S3_REGION", "us-east-1").strip() or "us-east-1"
 S3_BUCKET = os.environ.get("ENLACE_S3_BUCKET", "filedrop-storage").strip() or "filedrop-storage"
 S3_ACCESS_KEY = os.environ.get("ENLACE_S3_ACCESS_KEY", "").strip()
@@ -623,18 +631,16 @@ def logout():
 
 @app.route("/")
 def pc_interface():
-    # Esta plantilla (pc.html) SIEMPRE se registra como is_host:true en el
-    # socket. Antes, cualquier dispositivo de la red que escribiera la
-    # direccion "pelona" (sin /mobile ni /desktop) recibia exactamente esta
-    # misma pagina y terminaba marcado como "anfitriona" tambien -> por eso
-    # se veian varias entradas identicas en "Dispositivos conectados".
-    # Ahora solo la maquina que de verdad corre "python3 server.py" (la que
-    # entra por localhost, tal como lo indica el mensaje de arranque en la
-    # terminal) ve el panel de anfitriona; cualquier otro dispositivo que
-    # llegue aqui casi seguro queria conectarse como invitado, asi que lo
-    # mandamos a /desktop en su lugar.
-    if _client_ip() not in ("127.0.0.1", "::1"):
-        return redirect(url_for("desktop_interface"))
+    ua = request.headers.get("User-Agent", "").lower()
+    is_mobile = any(m in ua for m in ("iphone", "android", "ipad", "mobile"))
+    if is_mobile:
+        return redirect(url_for("phone_interface"))
+    return render_template("pc.html", local_ip=get_local_ip(), port=PORT)
+
+
+@app.route("/host")
+@app.route("/pc")
+def host_interface():
     return render_template("pc.html", local_ip=get_local_ip(), port=PORT)
 
 
