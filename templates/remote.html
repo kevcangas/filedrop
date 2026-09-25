@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Enlace · Invitado</title>
+<title>Filedrop · Móvil</title>
 <link rel="manifest" href="/manifest.json?type={{ default_type }}">
 <meta name="theme-color" content="#0c1420">
 <link rel="stylesheet" href="/static/style.css">
@@ -14,94 +14,98 @@
 <div id="toasts" role="status" aria-live="polite"></div>
 
 <div class="mobile-shell">
-  <div class="brand spread">
+  <!-- Encabezado de la app -->
+  <div class="brand spread" style="margin-bottom:14px;">
     <div class="row">
-      <span class="brand-mark">ENLACE</span>
-      <span class="brand-sub" id="brand-sub">{{ "computadora invitada" if default_type == "pc" else "celular invitado" }}</span>
-      <span class="role-pill">Invitado</span>
+      <span class="brand-mark">FILEDROP</span>
+      <span class="brand-sub" id="brand-sub">móvil & S3</span>
+      <span class="role-pill">Móvil</span>
     </div>
     <div class="row" style="gap:12px; align-items:center;">
-      <a href="/pc" class="device-meta" style="color:var(--text);">🖥️ Panel PC</a>
+      <a href="/desktop" class="device-meta" style="color:var(--text);">🖥️ Panel PC</a>
       <a href="/logout" class="device-meta">cerrar sesión</a>
     </div>
   </div>
 
-  <!-- Pantalla: no conectado -->
-  <div id="screen-connect">
-    <div class="panel">
-      <p class="panel-title">Conectar a la computadora anfitriona</p>
-      <div class="stack">
+  <!-- Barra de pestañas principal móvil -->
+  <div class="page-tabs" style="margin-bottom:16px;">
+    <button type="button" class="primary" id="tab-btn-s3">☁️ S3 Nube</button>
+    <button type="button" id="tab-btn-transfer">📤 Transferir</button>
+    <button type="button" id="tab-btn-buzon">📥 Buzón</button>
+    <button type="button" id="tab-btn-connect">⚙️ Conexión</button>
+  </div>
+
+  <!-- ══════════════════ PESTAÑA: ALMACENAMIENTO S3 ══════════════════ -->
+  <div id="tab-s3-content" class="stack">
+    <div class="panel" id="s3-remote-panel">
+      <div class="spread" style="align-items:center; flex-wrap:wrap; gap:8px;">
         <div>
-          <label for="input-ip">Dirección IP y puerto</label>
-          <input type="text" id="input-ip" placeholder="192.168.1.50:41823">
-        </div>
-        <div>
-          <label for="input-device-name">Nombre de este dispositivo</label>
-          <input type="text" id="input-device-name" placeholder="p. ej. Celular de Ana">
-          <p class="empty-hint" style="padding:4px 0 0; margin:0;">Así te van a ver los demás dispositivos conectados. Se autocompleta, pero puedes cambiarlo.</p>
-        </div>
-        <div>
-          <label for="input-alias">Guardar esta conexión como (opcional)</label>
-          <input type="text" id="input-alias" placeholder="Casa, oficina…">
-        </div>
-        <div>
-          <label>Este dispositivo es</label>
-          <div class="row" id="type-toggle">
-            <button type="button" data-type="phone" id="type-phone">📱 Celular</button>
-            <button type="button" data-type="pc" id="type-pc">💻 Computadora</button>
+          <p class="panel-title" style="margin-bottom:2px;">☁️ Almacenamiento en la Nube S3</p>
+          <div class="row" style="gap:6px; align-items:center;">
+            <span class="s3-badge" id="s3-user-prefix-badge">users/...</span>
+            <span class="device-meta" id="s3-stats-meta">0 archivos · 0 MB</span>
           </div>
         </div>
-        <button class="primary" id="btn-connect-new">Guardar y conectar</button>
+        <div class="row" style="gap:6px;">
+          <button id="btn-s3-direct-upload" class="primary" style="font-size:12px; padding:6px 10px;">⬆️ Subir a S3</button>
+          <button id="btn-s3-new-folder" style="font-size:12px; padding:6px 10px;">➕ Carpeta</button>
+          <button id="btn-s3-refresh" style="font-size:12px; padding:6px 10px;">🔄</button>
+          <input type="file" id="s3-direct-file-input" multiple style="display:none;">
+        </div>
       </div>
-    </div>
 
-    <div class="panel" id="saved-panel">
-      <p class="panel-title">Guardadas</p>
-      <div id="saved-list" class="stack">
-        <p class="empty-hint">Todavía no tienes conexiones guardadas.</p>
+      <!-- Barra de búsqueda -->
+      <div style="margin-top:12px;">
+        <input type="text" id="s3-search-input" placeholder="🔍 Filtrar archivos por nombre..." style="width:100%;">
+      </div>
+
+      <!-- Migas de pan (Breadcrumbs) -->
+      <div class="s3-breadcrumbs-bar" id="s3-breadcrumbs">
+        <span class="s3-crumb active" data-folder="">🏠 Inicio</span>
+      </div>
+
+      <!-- Subcarpetas -->
+      <div id="s3-folders-container" style="display:none;">
+        <p style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted); margin:8px 0 4px 0;">Carpetas:</p>
+        <div class="s3-folder-grid" id="s3-folders-list"></div>
+      </div>
+
+      <!-- Lista de archivos -->
+      <div id="s3-files-container">
+        <p style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted); margin:8px 0 4px 0;">Archivos:</p>
+        <div class="stack" id="s3-files-list">
+          <p class="empty-hint">Cargando archivos...</p>
+        </div>
       </div>
     </div>
   </div>
 
-  <!-- Pantalla: conectado -->
-  <div id="screen-connected" style="display:none;">
-    <div class="panel">
+  <!-- ══════════════════ PESTAÑA: TRANSFERIR EN VIVO ══════════════════ -->
+  <div id="tab-transfer-content" class="stack" style="display:none;">
+    <!-- Estado de conexión rápida -->
+    <div class="panel" style="padding:10px 14px;">
       <div class="spread">
-        <div class="row">
+        <div class="row" style="gap:8px;">
           <span class="pulse live" id="conn-pulse"></span>
           <div>
-            <div class="device-name" id="conn-alias">—</div>
-            <div class="device-meta" id="conn-ip">—</div>
+            <span class="device-name" id="conn-alias" style="font-size:13px; font-weight:600;">Conectando…</span>
+            <span class="device-meta" id="conn-ip" style="font-size:11px;">—</span>
           </div>
         </div>
-        <div class="row">
-          <button id="btn-notif-enable">🔔 Activar</button>
-          <button id="btn-disconnect">Desconectar</button>
-        </div>
-      </div>
-      <p class="empty-hint" id="notif-status" style="padding:8px 0 0; margin:0;">
-        Avísame con una notificación del sistema cuando llegue un archivo o algo al portapapeles, aunque no esté viendo esta pestaña.
-      </p>
-    </div>
-
-    <div class="panel">
-      <p class="panel-title">Dispositivos disponibles</p>
-      <p class="empty-hint" style="padding:0 0 8px 0;">
-        🖥️ con la insignia "Anfitriona" es la computadora que ejecuta el programa. Los demás son dispositivos que solo se anexaron para transferir.
-      </p>
-      <div id="device-list" class="stack">
-        <p class="empty-hint">Ningún otro dispositivo conectado todavía.</p>
+        <button id="btn-quick-config" style="padding:4px 8px; font-size:12px;">⚙️ Ajustes</button>
       </div>
     </div>
 
+    <!-- Enviar archivo -->
     <div class="panel">
       <p class="panel-title">Enviar archivo</p>
       <div id="dropzone" class="dropzone">
         <div class="dz-title">Toca para elegir archivo(s)</div>
-        <div class="dz-sub">se envían al dispositivo seleccionado arriba (o a todos, con "Global") — si eliges varios, se empaquetan en un .zip automáticamente</div>
+        <div class="dz-sub">se envían al destino seleccionado abajo — varios archivos se empaquetan en .zip</div>
         <input type="file" id="file-input" multiple style="display:none;">
         <input type="file" id="folder-input" webkitdirectory style="display:none;">
       </div>
+
       <div class="dest-selector-box" style="margin-top:12px; padding:10px 12px; background:var(--panel-2); border:1px solid var(--border); border-radius:var(--radius);">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
           <span style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted);">Destino del archivo:</span>
@@ -122,82 +126,104 @@
           </label>
         </div>
         <div id="s3-target-hint" style="display:none; margin-top:8px; font-size:12px; color:var(--accent-2); align-items:center; gap:6px;">
-          <span>📁 En S3:</span>
+          <span>📁 Carpeta en S3:</span>
           <code id="s3-current-target-folder" style="font-family:var(--mono); background:rgba(0,0,0,0.3); padding:2px 6px; border-radius:4px;">(raíz)</code>
         </div>
       </div>
-      <!-- Checkbox oculto para compatibilidad con funciones previas -->
       <input type="checkbox" id="chk-buzon" style="display:none;">
     </div>
 
-
+    <!-- Dispositivos disponibles -->
     <div class="panel">
-      <div class="spread">
-        <p class="panel-title" style="margin-bottom:0;">Buzón (para descargar después)</p>
-        <button id="btn-buzon-refresh">Actualizar</button>
-      </div>
-      <p class="empty-hint" style="padding:0 0 8px 0;">
-        Lo que te manden aquí se queda guardado en el servidor un tiempo, aunque no estés conectado en ese momento.
-      </p>
-      <div id="buzon-list" class="stack">
-        <p class="empty-hint">Nada en el buzón todavía.</p>
+      <p class="panel-title">Dispositivos conectados</p>
+      <div id="device-list" class="stack">
+        <p class="empty-hint">Buscando dispositivos…</p>
       </div>
     </div>
 
-    <!-- Panel de Almacenamiento S3 en Móvil -->
-    <div class="panel" id="s3-remote-panel">
-      <div class="spread" style="align-items:center; flex-wrap:wrap; gap:8px;">
-        <div>
-          <p class="panel-title" style="margin-bottom:2px;">☁️ Almacenamiento S3</p>
-          <div class="row" style="gap:6px; align-items:center;">
-            <span class="s3-badge" id="s3-user-prefix-badge">users/...</span>
-            <span class="device-meta" id="s3-stats-meta">0 archivos</span>
-          </div>
-        </div>
-        <div class="row" style="gap:6px;">
-          <button id="btn-s3-new-folder" style="font-size:12px; padding:4px 8px;">➕ Carpeta</button>
-          <button id="btn-s3-refresh" style="font-size:12px; padding:4px 8px;">Actualizar</button>
-        </div>
-      </div>
-
-      <div style="margin-top:10px;">
-        <input type="text" id="s3-search-input" placeholder="🔍 Filtrar por nombre..." style="width:100%;">
-      </div>
-
-      <div class="s3-breadcrumbs-bar" id="s3-breadcrumbs">
-        <span class="s3-crumb active" data-folder="">🏠 Inicio</span>
-      </div>
-
-      <div id="s3-folders-container" style="display:none;">
-        <p style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted); margin:8px 0 4px 0;">Carpetas:</p>
-        <div class="s3-folder-grid" id="s3-folders-list"></div>
-      </div>
-
-      <div id="s3-files-container">
-        <p style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted); margin:8px 0 4px 0;">Archivos:</p>
-        <div class="stack" id="s3-files-list">
-          <p class="empty-hint">Cargando archivos...</p>
-        </div>
-      </div>
-    </div>
-
-
+    <!-- Portapapeles compartido -->
     <div class="panel">
       <div class="spread">
         <p class="panel-title" style="margin-bottom:0;">Portapapeles compartido</p>
         <span class="device-meta" id="clipboard-from"></span>
       </div>
-      <textarea id="clipboard-text" rows="3" placeholder="Aquí aparece lo último compartido, o escribe/pega algo para enviarlo…"></textarea>
-      <div class="row" style="margin-top:10px; justify-content:flex-end;">
-        <button id="btn-clipboard-copy">Copiar a mi portapapeles</button>
-        <button class="primary" id="btn-clipboard-send">Enviar portapapeles</button>
+      <textarea id="clipboard-text" rows="3" placeholder="Aquí aparece lo último compartido, o escribe para enviarlo…"></textarea>
+      <div class="row" style="margin-top:10px; justify-content:flex-end; gap:8px;">
+        <button id="btn-clipboard-copy">Copiar</button>
+        <button class="primary" id="btn-clipboard-send">Enviar</button>
+      </div>
+    </div>
+
+    <!-- Transferencias -->
+    <div class="panel">
+      <p class="panel-title">Transferencias</p>
+      <div id="transfers" class="stack">
+        <p class="empty-hint">Sin transferencias recientes.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════ PESTAÑA: BUZÓN TEMPORAL ══════════════════ -->
+  <div id="tab-buzon-content" class="stack" style="display:none;">
+    <div class="panel">
+      <div class="spread">
+        <p class="panel-title" style="margin-bottom:0;">📥 Buzón Temporal</p>
+        <button id="btn-buzon-refresh" style="padding:4px 10px; font-size:12px;">🔄 Actualizar</button>
+      </div>
+      <p class="empty-hint" style="padding:4px 0 8px 0;">
+        Archivos guardados en el servidor para descargar cuando quieras.
+      </p>
+      <div id="buzon-list" class="stack">
+        <p class="empty-hint">Nada en el buzón todavía.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════ PESTAÑA: CONEXIÓN & AJUSTES ══════════════════ -->
+  <div id="tab-connect-content" class="stack" style="display:none;">
+    <div class="panel">
+      <p class="panel-title">Conexión a la anfitriona</p>
+      <div class="stack">
+        <div>
+          <label for="input-ip">Dirección o IP del servidor</label>
+          <input type="text" id="input-ip" placeholder="ej: 192.168.1.50:41823 o filedrop.homelab.internal">
+        </div>
+        <div>
+          <label for="input-device-name">Nombre de este dispositivo</label>
+          <input type="text" id="input-device-name" placeholder="p. ej. Celular de Kevin">
+        </div>
+        <div>
+          <label for="input-alias">Guardar esta conexión como</label>
+          <input type="text" id="input-alias" placeholder="Homelab, Casa, Oficina…">
+        </div>
+        <div>
+          <label>Tipo de dispositivo</label>
+          <div class="row" id="type-toggle">
+            <button type="button" data-type="phone" id="type-phone">📱 Celular</button>
+            <button type="button" data-type="pc" id="type-pc">💻 Computadora</button>
+          </div>
+        </div>
+        <div class="row" style="gap:8px; justify-content:flex-end;">
+          <button id="btn-disconnect" class="danger">Desconectar</button>
+          <button class="primary" id="btn-connect-new">Guardar y conectar</button>
+        </div>
       </div>
     </div>
 
     <div class="panel">
-      <p class="panel-title">Transferencias</p>
-      <div id="transfers" class="stack">
-        <p class="empty-hint">Sin actividad todavía.</p>
+      <div class="spread">
+        <p class="panel-title" style="margin-bottom:0;">Notificaciones nativas</p>
+        <button id="btn-notif-enable">🔔 Activar</button>
+      </div>
+      <p class="empty-hint" id="notif-status" style="padding:8px 0 0; margin:0;">
+        Recibe avisos cuando llegue un archivo entrante o texto al portapapeles.
+      </p>
+    </div>
+
+    <div class="panel" id="saved-panel">
+      <p class="panel-title">Conexiones guardadas</p>
+      <div id="saved-list" class="stack">
+        <p class="empty-hint">Sin conexiones guardadas.</p>
       </div>
     </div>
   </div>
@@ -236,10 +262,10 @@
   </div>
 </div>
 
-<script src="/static/socket.io.min.js?v=4"></script>
-<script src="/static/jszip.min.js?v=4"></script>
-<script src="/static/transfer.js?v=4"></script>
-<script src="/static/notifications.js?v=4"></script>
-<script src="/static/remote.js?v=4"></script>
+<script src="/static/socket.io.min.js?v=5"></script>
+<script src="/static/jszip.min.js?v=5"></script>
+<script src="/static/transfer.js?v=5"></script>
+<script src="/static/notifications.js?v=5"></script>
+<script src="/static/remote.js?v=5"></script>
 </body>
 </html>

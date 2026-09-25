@@ -157,9 +157,12 @@ function connectTo(address, alias) {
   const url = address.includes("://") ? address : defaultScheme + address;
   socket = io(url, { transports: ["websocket", "polling"], reconnectionAttempts: 20 });
 
-  document.getElementById("conn-pulse").className = "pulse searching";
-  document.getElementById("conn-alias").textContent = currentAlias;
-  document.getElementById("conn-ip").textContent = address;
+  const pulse = document.getElementById("conn-pulse");
+  if (pulse) pulse.className = "pulse searching";
+  const aliasEl = document.getElementById("conn-alias");
+  if (aliasEl) aliasEl.textContent = currentAlias;
+  const ipEl = document.getElementById("conn-ip");
+  if (ipEl) ipEl.textContent = address;
 
   socket.on("connect", () => {
     socket.emit("register_device", {
@@ -168,7 +171,8 @@ function connectTo(address, alias) {
       device_type: getDeviceType(),
       is_host: false,
     });
-    document.getElementById("conn-pulse").className = "pulse live";
+    const p = document.getElementById("conn-pulse");
+    if (p) p.className = "pulse live";
     showScreen("connected");
     refreshBuzon();
     if (typeof loadS3Explorer === "function") {
@@ -183,7 +187,8 @@ function connectTo(address, alias) {
   });
 
   socket.on("disconnect", () => {
-    document.getElementById("conn-pulse").className = "pulse";
+    const p = document.getElementById("conn-pulse");
+    if (p) p.className = "pulse";
     if (hasActiveTransfers()) {
       toast("Se perdió la conexión durante una transferencia. Reintentando…", true);
     } else {
@@ -192,7 +197,8 @@ function connectTo(address, alias) {
   });
 
   socket.on("connect_error", () => {
-    document.getElementById("conn-pulse").className = "pulse";
+    const p = document.getElementById("conn-pulse");
+    if (p) p.className = "pulse";
     toast("No se pudo conectar a " + address + ". Revisa la IP y que estén en la misma red.", true);
   });
 
@@ -215,8 +221,9 @@ function guessDeviceName() {
 }
 
 function showScreen(name) {
-  document.getElementById("screen-connect").style.display = name === "connect" ? "block" : "none";
-  document.getElementById("screen-connected").style.display = name === "connected" ? "block" : "none";
+  if (name === "connect") {
+    if (typeof setMobileTab === "function") setMobileTab("connect");
+  }
 }
 
 // --- Formulario de conexión nueva ----------------------------------------------
@@ -226,7 +233,7 @@ document.getElementById("btn-connect-new").onclick = () => {
   const alias = document.getElementById("input-alias").value.trim();
   const deviceName = document.getElementById("input-device-name").value.trim();
   if (!address) {
-    toast("Escribe la dirección IP de la computadora anfitriona.", true);
+    toast("Escribe la dirección IP o dominio de la anfitriona.", true);
     return;
   }
   setOwnDeviceName(deviceName || guessDeviceName());
@@ -238,12 +245,18 @@ document.getElementById("btn-connect-new").onclick = () => {
     renderSaved();
   }
   connectTo(address, finalAlias);
+  if (typeof setMobileTab === "function") setMobileTab("transfer");
 };
 
 document.getElementById("btn-disconnect").onclick = () => {
   if (socket) socket.disconnect();
   devices = [];
   selectedDeviceId = null;
+  const p = document.getElementById("conn-pulse");
+  if (p) p.className = "pulse";
+  const aliasEl = document.getElementById("conn-alias");
+  if (aliasEl) aliasEl.textContent = "Desconectado";
+  toast("Desconectado.");
   showScreen("connect");
 };
 
@@ -736,16 +749,50 @@ if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/service-worker.js").catch(() => {});
 }
 
-// Como esta misma pagina siempre se carga desde la computadora anfitriona
-// (http://<ip-real>:<puerto-real>/mobile o /desktop), usamos esa direccion
-// para precompletar el campo de conexion: asi nadie tiene que copiar el
-// puerto a mano, y nunca queda un "5000" viejo que ya no es el puerto real.
-(function prefillHostAddress() {
-  const input = document.getElementById("input-ip");
-  if (input && !input.value && window.location.host) {
-    input.value = window.location.host;
+// --- Pestañas Móvil (S3, Transferir, Buzón, Conexión) -----------------------
+
+function setMobileTab(tab) {
+  const tabs = ["s3", "transfer", "buzon", "connect"];
+  tabs.forEach((t) => {
+    const btn = document.getElementById(`tab-btn-${t}`);
+    const content = document.getElementById(`tab-${t}-content`);
+    if (btn) btn.classList.toggle("primary", t === tab);
+    if (content) content.style.display = (t === tab ? "flex" : "none");
+  });
+  localStorage.setItem("enlace_mobile_tab", tab);
+  if (tab === "s3" && typeof loadS3Explorer === "function") {
+    loadS3Explorer({ getUserId: getDeviceId, toast: toast });
+  } else if (tab === "buzon") {
+    refreshBuzon();
   }
-})();
+}
+
+const tabBtnS3 = document.getElementById("tab-btn-s3");
+const tabBtnTransfer = document.getElementById("tab-btn-transfer");
+const tabBtnBuzon = document.getElementById("tab-btn-buzon");
+const tabBtnConnect = document.getElementById("tab-btn-connect");
+const btnQuickConfig = document.getElementById("btn-quick-config");
+
+if (tabBtnS3) tabBtnS3.onclick = () => setMobileTab("s3");
+if (tabBtnTransfer) tabBtnTransfer.onclick = () => setMobileTab("transfer");
+if (tabBtnBuzon) tabBtnBuzon.onclick = () => setMobileTab("buzon");
+if (tabBtnConnect) tabBtnConnect.onclick = () => setMobileTab("connect");
+if (btnQuickConfig) btnQuickConfig.onclick = () => setMobileTab("connect");
+
+// --- Botón de Subida Directa a S3 -------------------------------------------
+const directS3Btn = document.getElementById("btn-s3-direct-upload");
+const directS3Input = document.getElementById("s3-direct-file-input");
+if (directS3Btn && directS3Input) {
+  directS3Btn.onclick = () => directS3Input.click();
+  directS3Input.onchange = async (e) => {
+    if (e.target.files && e.target.files.length) {
+      const items = filesToItems(e.target.files);
+      const { file, isBundle, count } = await packageForSending(items);
+      sendItemsToS3(file, isBundle, count, currentS3Folder || "");
+      e.target.value = "";
+    }
+  };
+}
 
 renderSaved();
 refreshNotifStatus();
@@ -756,3 +803,19 @@ if (typeof setupS3ExplorerEvents === "function") {
     toast: toast
   });
 }
+
+// Cargar pestaña inicial (S3 por defecto para acceso directo)
+const savedMobileTab = localStorage.getItem("enlace_mobile_tab") || "s3";
+setMobileTab(savedMobileTab);
+
+// Auto-conectar de inmediato a la anfitriona
+(function autoConnectHost() {
+  const host = window.location.host;
+  const input = document.getElementById("input-ip");
+  if (input && !input.value && host) {
+    input.value = host;
+  }
+  if (host && !socket) {
+    connectTo(host, "Anfitriona");
+  }
+})();

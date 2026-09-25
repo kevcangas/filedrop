@@ -682,3 +682,17 @@ if (typeof setupS3ExplorerEvents === "function") {
   });
 }
 
+const directS3BtnPc = document.getElementById("btn-s3-direct-upload");
+const directS3InputPc = document.getElementById("s3-direct-file-input");
+if (directS3BtnPc && directS3InputPc) {
+  directS3BtnPc.onclick = () => directS3InputPc.click();
+  directS3InputPc.onchange = async (e) => {
+    if (e.target.files && e.target.files.length) {
+      const items = filesToItems(e.target.files);
+      const { file, isBundle, count } = await packageForSending(items);
+      sendItemsToS3(file, isBundle, count, currentS3Folder || "");
+      e.target.value = "";
+    }
+  };
+}
+

@@ -19,6 +19,9 @@ ACCESS_PASSWORD). Nadie puede ver ni usar nada de Enlace sin escribirla
 primero, ya sea en la misma red o desde afuera.
 """
 
+import base64
+import hashlib
+import hmac
 import json
 import os
 import signal
@@ -41,6 +44,7 @@ from flask import (
     Flask,
     Response,
     abort,
+    has_request_context,
     jsonify,
     redirect,
     render_template,
@@ -205,6 +209,12 @@ if S3_ENDPOINT_URL and ("localhost:9000" in S3_ENDPOINT_URL or "127.0.0.1:9000" 
         S3_ENDPOINT_URL = S3_ENDPOINT_URL.replace("localhost:9000", "app-minio:9000").replace("127.0.0.1:9000", "app-minio:9000")
     except Exception:
         pass
+
+# Endpoint público para generación de enlaces prefirmados externos directos (ej: https://s3.homelab.internal)
+S3_PUBLIC_URL = os.environ.get("ENLACE_S3_PUBLIC_URL", "").strip() or None
+if S3_PUBLIC_URL and not (S3_PUBLIC_URL.startswith("http://") or S3_PUBLIC_URL.startswith("https://")):
+    S3_PUBLIC_URL = "https://" + S3_PUBLIC_URL
+
 S3_REGION = os.environ.get("ENLACE_S3_REGION", "us-east-1").strip() or "us-east-1"
 S3_BUCKET = os.environ.get("ENLACE_S3_BUCKET", "filedrop-storage").strip() or "filedrop-storage"
 S3_ACCESS_KEY = os.environ.get("ENLACE_S3_ACCESS_KEY", "").strip()
@@ -217,6 +227,24 @@ S3_AUTO_CREATE_BUCKET = os.environ.get("ENLACE_S3_AUTO_CREATE_BUCKET", "1").stri
 _s3_client = None
 _s3_lock = threading.Lock()
 _s3_bucket_verified = False
+
+_s3_pub_client = None
+_s3_pub_lock = threading.Lock()
+
+
+def get_public_base_url():
+    """Devuelve la URL base pública accesible de FileDrop (respetando Traefik o túneles)."""
+    pub = os.environ.get("ENLACE_PUBLIC_URL", "").strip() or PUBLIC_URL
+    if pub:
+        if not (pub.startswith("http://") or pub.startswith("https://")):
+            pub = "https://" + pub
+        return pub.rstrip("/")
+    if has_request_context():
+        proto = request.headers.get("X-Forwarded-Proto") or request.scheme
+        host = request.headers.get("X-Forwarded-Host") or request.host
+        return f"{proto}://{host}".rstrip("/")
+    return f"http://{get_local_ip()}:{PORT}"
+
 
 
 # ==============================================================================
@@ -503,7 +531,7 @@ def get_local_ip():
 # necesita para verse bien.
 
 OPEN_EXACT_PATHS = ("/login", "/manifest.json", "/service-worker.js")
-OPEN_PREFIXES = ("/static/",)
+OPEN_PREFIXES = ("/static/", "/api/s3/share/download/", "/s3/share/")
 
 
 def is_logged_in():
@@ -634,9 +662,7 @@ def logout():
 @app.route("/pc")
 @app.route("/host")
 def pc_interface():
-    ua = request.headers.get("User-Agent", "").lower()
-    is_mobile = any(m in ua for m in ("iphone", "android", "ipad", "mobile"))
-    if is_mobile:
+    if request.path == "/" and request.args.get("view") == "mobile":
         return redirect(url_for("phone_interface"))
     return render_template("pc.html", local_ip=get_local_ip(), port=PORT)
 
@@ -1049,6 +1075,64 @@ def get_s3_client():
             return None, f"Failed to connect to S3: {str(e)}"
 
 
+def get_s3_public_client():
+    """Devuelve un cliente boto3 configurado con el endpoint público para URLs prefirmadas directas a S3."""
+    global _s3_pub_client
+    if not S3_PUBLIC_URL:
+        return None, "No public S3 endpoint defined."
+    with _s3_pub_lock:
+        if _s3_pub_client is not None:
+            return _s3_pub_client, None
+        try:
+            import boto3
+            from botocore.config import Config
+            client_kwargs = {
+                "service_name": "s3",
+                "region_name": S3_REGION,
+                "endpoint_url": S3_PUBLIC_URL,
+                "config": Config(signature_version="s3v4", s3={"addressing_style": "auto"}),
+            }
+            if S3_ACCESS_KEY and S3_SECRET_KEY:
+                client_kwargs["aws_access_key_id"] = S3_ACCESS_KEY
+                client_kwargs["aws_secret_access_key"] = S3_SECRET_KEY
+            _s3_pub_client = boto3.client(**client_kwargs)
+            return _s3_pub_client, None
+        except Exception as e:
+            return None, f"Failed to initialize public S3 client: {str(e)}"
+
+
+def make_s3_share_token(key: str, user_id: str, filename: str, expires_in: int = 3600) -> str:
+    """Genera un token firmado con HMAC para descargas públicas seguras de S3 a través de FileDrop."""
+    payload = {
+        "k": key,
+        "u": user_id,
+        "f": filename,
+        "exp": int(time.time() + expires_in),
+    }
+    raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    secret = (app.secret_key or ACCESS_PASSWORD or "filedrop-secret").encode("utf-8")
+    sig = hmac.new(secret, raw, hashlib.sha256).hexdigest()
+    return base64.urlsafe_b64encode(raw + b"." + sig.encode("ascii")).decode("ascii").rstrip("=")
+
+
+def verify_s3_share_token(token_str: str):
+    """Verifica la firma y expiración de un token de descarga compartida."""
+    try:
+        padded = token_str + "=" * (-len(token_str) % 4)
+        token_bytes = base64.urlsafe_b64decode(padded)
+        raw, sig = token_bytes.rsplit(b".", 1)
+        secret = (app.secret_key or ACCESS_PASSWORD or "filedrop-secret").encode("utf-8")
+        expected = hmac.new(secret, raw, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(sig.decode("ascii"), expected):
+            return None, "Firma del enlace inválida"
+        payload = json.loads(raw.decode("utf-8"))
+        if time.time() > payload.get("exp", 0):
+            return None, "El enlace compartido ha expirado"
+        return payload, None
+    except Exception as e:
+        return None, str(e)
+
+
 def get_caller_user_id():
     """Identifica al usuario o dispositivo llamante para aislar su prefijo en S3."""
     user_id = ""
@@ -1329,7 +1413,7 @@ def s3_folders_delete():
 
 @app.route("/api/s3/download/<path:key>", methods=["GET"])
 def s3_download(key):
-    """Descarga un objeto validando que pertenezca al usuario (stream o redirección presigned)."""
+    """Descarga un objeto validando que pertenezca al usuario (stream o redirección presigned pública)."""
     client, err = get_s3_client()
     if not client:
         abort(404)
@@ -1343,7 +1427,9 @@ def s3_download(key):
     filename = clean_display_name(key)
     disposition = f'attachment; filename="{filename}"'
 
-    if request.args.get("stream") == "1":
+    # Si se solicita streaming o si no hay un S3_PUBLIC_URL configurado (para evitar
+    # redirecciones a hostnames internos de Docker como app-minio:9000), hacemos streaming directo.
+    if request.args.get("stream") == "1" or not S3_PUBLIC_URL:
         try:
             s3_obj = client.get_object(Bucket=S3_BUCKET, Key=key)
             mimetype = s3_obj.get("ContentType") or mimetypes.guess_type(filename)[0] or "application/octet-stream"
@@ -1355,31 +1441,36 @@ def s3_download(key):
         except Exception:
             abort(404)
 
-    try:
-        presigned_url = client.generate_presigned_url(
-            ClientMethod="get_object",
-            Params={
-                "Bucket": S3_BUCKET,
-                "Key": key,
-                "ResponseContentDisposition": disposition,
-            },
-            ExpiresIn=300,
-        )
-        return redirect(presigned_url)
-    except Exception:
+    # Si S3_PUBLIC_URL está configurado, usamos el cliente público para redirigir
+    pub_client, _ = get_s3_public_client()
+    if pub_client:
         try:
-            s3_obj = client.get_object(Bucket=S3_BUCKET, Key=key)
-            mimetype = s3_obj.get("ContentType") or mimetypes.guess_type(filename)[0] or "application/octet-stream"
-            response = Response(s3_obj["Body"].iter_chunks(chunk_size=128 * 1024), mimetype=mimetype)
-            response.headers["Content-Disposition"] = disposition
-            return response
+            presigned_url = pub_client.generate_presigned_url(
+                ClientMethod="get_object",
+                Params={
+                    "Bucket": S3_BUCKET,
+                    "Key": key,
+                    "ResponseContentDisposition": disposition,
+                },
+                ExpiresIn=300,
+            )
+            return redirect(presigned_url)
         except Exception:
-            abort(404)
+            pass
+
+    try:
+        s3_obj = client.get_object(Bucket=S3_BUCKET, Key=key)
+        mimetype = s3_obj.get("ContentType") or mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        response = Response(s3_obj["Body"].iter_chunks(chunk_size=128 * 1024), mimetype=mimetype)
+        response.headers["Content-Disposition"] = disposition
+        return response
+    except Exception:
+        abort(404)
 
 
 @app.route("/api/s3/share/<path:key>", methods=["GET"])
 def s3_share(key):
-    """Genera una URL prefirmada temporal para compartir el archivo externamente."""
+    """Genera una URL pública temporal para compartir el archivo externamente."""
     client, err = get_s3_client()
     if not client:
         return jsonify({"ok": False, "error": err}), 400
@@ -1397,24 +1488,81 @@ def s3_share(key):
         expires_in = 3600
 
     filename = clean_display_name(key)
-    try:
-        presigned_url = client.generate_presigned_url(
-            ClientMethod="get_object",
-            Params={
-                "Bucket": S3_BUCKET,
-                "Key": key,
-                "ResponseContentDisposition": f'inline; filename="{filename}"',
-            },
-            ExpiresIn=expires_in,
+
+    # 1. Si existe ENLACE_S3_PUBLIC_URL (ej: https://s3.homelab.internal),
+    # generamos la URL prefirmada directa usando ese endpoint público para que coincida la firma SigV4.
+    if S3_PUBLIC_URL:
+        pub_client, pub_err = get_s3_public_client()
+        if pub_client:
+            try:
+                presigned_url = pub_client.generate_presigned_url(
+                    ClientMethod="get_object",
+                    Params={
+                        "Bucket": S3_BUCKET,
+                        "Key": key,
+                        "ResponseContentDisposition": f'inline; filename="{filename}"',
+                    },
+                    ExpiresIn=expires_in,
+                )
+                return jsonify({
+                    "ok": True,
+                    "url": presigned_url,
+                    "expires_in": expires_in,
+                    "filename": filename,
+                })
+            except Exception as e:
+                print(f"[S3] Warning generating public presigned URL: {e}")
+
+    # 2. Si no hay S3_PUBLIC_URL o falla, generamos un enlace público temporal firmado
+    # a través de la URL pública de FileDrop (respetando Traefik o ENLACE_PUBLIC_URL).
+    token = make_s3_share_token(key, user_id, filename, expires_in)
+    share_url = f"{get_public_base_url()}/api/s3/share/download/{token}"
+    return jsonify({
+        "ok": True,
+        "url": share_url,
+        "expires_in": expires_in,
+        "filename": filename,
+    })
+
+
+@app.route("/api/s3/share/download/<token>", methods=["GET"])
+@app.route("/s3/share/<token>", methods=["GET"])
+def s3_public_download(token):
+    """Permite descargar un archivo de S3 públicamente usando un token firmado temporal."""
+    payload, err = verify_s3_share_token(token)
+    if not payload:
+        return Response(
+            f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>Enlace no disponible</title>
+            <style>body{{font-family:sans-serif;background:#10161c;color:#eef1f0;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;}}
+            .card{{background:#1a222b;padding:32px;border-radius:12px;border:1px solid #2a3542;max-width:400px;text-align:center;}}
+            h2{{color:#e0574a;margin-top:0;}}p{{color:#9aa5b0;font-size:14px;}}</style></head>
+            <body><div class="card"><h2>⚠️ Enlace no disponible</h2><p>{err or "El enlace ha caducado o no existe."}</p></div></body></html>""",
+            status=403,
+            mimetype="text/html",
         )
-        return jsonify({
-            "ok": True,
-            "url": presigned_url,
-            "expires_in": expires_in,
-            "filename": filename,
-        })
-    except Exception as e:
-        return jsonify({"ok": False, "error": f"Failed to generate share URL: {str(e)}"}), 500
+
+    key = payload.get("k", "")
+    filename = payload.get("f", "") or clean_display_name(key)
+
+    client, s3_err = get_s3_client()
+    if not client:
+        abort(500)
+
+    try:
+        s3_obj = client.get_object(Bucket=S3_BUCKET, Key=key)
+        mimetype = s3_obj.get("ContentType") or mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        as_attachment = request.args.get("dl") == "1"
+        disp_type = "attachment" if as_attachment else "inline"
+        disposition = f'{disp_type}; filename="{filename}"'
+
+        response = Response(s3_obj["Body"].iter_chunks(chunk_size=128 * 1024), mimetype=mimetype)
+        response.headers["Content-Disposition"] = disposition
+        if "ContentLength" in s3_obj:
+            response.headers["Content-Length"] = str(s3_obj["ContentLength"])
+        return response
+    except Exception:
+        abort(404)
+
 
 
 @app.route("/api/s3/delete", methods=["POST"])
