@@ -1,6 +1,4 @@
 app_name: filedrop
-port: 41823
-dockerfile: Dockerfile
 services:
   - name: web
     container: enlace
