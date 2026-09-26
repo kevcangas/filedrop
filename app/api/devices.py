@@ -24,6 +24,37 @@ def require_user():
     return db_sess.scalar(select(User).where(User.id == user_id, User.is_active == True))
 
 
+@devices_bp.route("/me", methods=["GET"])
+def get_current_device():
+    """Retrieve the current active authenticated device and user profile."""
+    current_user = require_user()
+    if not current_user:
+        return jsonify({"ok": False, "error": "Authentication required."}), 401
+
+    current_device_id = session.get("device_id")
+    device = None
+    db_sess = get_db()
+    if current_device_id:
+        device = db_sess.scalar(
+            select(Device).where(Device.id == to_uuid(current_device_id), Device.user_id == current_user.id, Device.is_active == True)
+        )
+    if not device:
+        device = db_sess.scalar(
+            select(Device).where(Device.user_id == current_user.id, Device.is_active == True).order_by(Device.last_seen_at.desc())
+        )
+        if device:
+            session["device_id"] = str(device.id)
+
+    if not device:
+        return jsonify({"ok": False, "error": "No active device enrolled for this session."}), 404
+
+    return jsonify({
+        "ok": True,
+        "device": device.to_dict(),
+        "user": current_user.to_dict(),
+    }), 200
+
+
 @devices_bp.route("", methods=["GET"])
 def list_devices():
     """List all enrolled devices for the authenticated user."""

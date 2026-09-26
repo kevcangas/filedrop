@@ -116,7 +116,91 @@ Devuelve el perfil del usuario autenticado y los metadatos de su dispositivo act
 
 ---
 
-### 1.2 Amistades y Confianza (`/api/friends/*`)
+### 1.2 Gestión de Dispositivos (`/api/devices/*`)
+
+Permite la administración de dispositivos registrados, consulta de la sesión activa y revocación de terminales.
+
+#### `GET /api/devices/me`
+Devuelve los metadatos del dispositivo activo vinculado a la sesión actual y el perfil del usuario.
+
+- **Response `200 OK`**:
+  ```json
+  {
+    "ok": true,
+    "user": {
+      "id": "c1f2e3d4-...",
+      "username": "kevin",
+      "display_name": "Kevin Cangas"
+    },
+    "device": {
+      "id": "e5f6a7b8-...",
+      "device_name": "MacBook Pro",
+      "device_type": "pc",
+      "is_active": true
+    }
+  }
+  ```
+
+#### `GET /api/devices`
+Lista todos los dispositivos vinculados a la cuenta del usuario autenticado, indicando cuál corresponde a la sesión actual (`is_current`).
+
+- **Response `200 OK`**:
+  ```json
+  {
+    "ok": true,
+    "current_device_id": "e5f6a7b8-...",
+    "devices": [
+      {
+        "id": "e5f6a7b8-...",
+        "device_name": "MacBook Pro",
+        "device_type": "pc",
+        "last_seen_at": "2026-09-26T15:30:00Z",
+        "is_current": true
+      },
+      {
+        "id": "5a8a1483-...",
+        "device_name": "iPhone 15",
+        "device_type": "mobile",
+        "last_seen_at": "2026-09-26T15:28:10Z",
+        "is_current": false
+      }
+    ]
+  }
+  ```
+
+#### `PATCH /api/devices/<device_id>/rename`
+Modifica el nombre legible de un dispositivo perteneciente al usuario.
+
+- **Request Body (JSON)**:
+  ```json
+  {
+    "device_name": "MacBook de Trabajo"
+  }
+  ```
+- **Response `200 OK`**:
+  ```json
+  {
+    "ok": true,
+    "message": "Device renamed successfully.",
+    "device": { "id": "...", "device_name": "MacBook de Trabajo" }
+  }
+  ```
+
+#### `DELETE /api/devices/<device_id>/revoke`
+Desactiva el dispositivo indicado. Si corresponde a la sesión en curso, invalida la sesión HTTP inmediatamente.
+
+- **Response `200 OK`**:
+  ```json
+  {
+    "ok": true,
+    "message": "Device revoked.",
+    "session_terminated": false
+  }
+  ```
+
+---
+
+### 1.3 Amistades y Confianza (`/api/friends/*`)
 
 El acceso entre dispositivos de distintos usuarios está gobernado por una lista de control de acceso (ACL) mutua.
 
@@ -337,11 +421,12 @@ Los WebSockets gestionan presencia instantánea, sincronización de portapapeles
 
 | Evento | Carga (Payload) | Descripción |
 | :--- | :--- | :--- |
-| `session_ready` | `{ user_id, device_id }` | Confirma conexión autenticada lista. |
-| `devices_update` | `[ { id, name, type, is_own, owner_name } ]` | Lista en vivo de dispositivos autorizados conectados. |
-| `file_offer` | `{ from_id, from_name, file_id, file_name, file_size, preview }` | Notificación modal de archivo entrante con previsualización. |
-| `file_response` | `{ file_id, accepted }` | Informa al emisor si su oferta fue aceptada para iniciar la transmisión. |
-| `file_chunk` | `{ file_id, chunk_index, total_chunks, data }` | Entrega un trozo del archivo al receptor. |
-| `transfer_error` | `{ message }` | Notifica error de autorización (ej. destinatario no es amigo) o fallo en transferencia. |
-| `clipboard_update` | `{ text, from_name }` | Sincroniza el portapapeles compartido en vivo. |
-| `buzon_nuevo` | `{ item_id, file_name, from_name }` | Alerta para refrescar la lista de archivos en el buzón. |
+| `session_ready` | `{ ok: true, user_id, device_id }` | Confirma la sesión WebSocket autenticada y ratifica los UUIDs canónicos. |
+| `devices_updated` | `{ devices: [ { device_id, device_name, device_type, owner_username, owner_display_name, is_own_account, is_online } ] }` | Emite la lista completa de dispositivos visibles a la sala del usuario (`user_<id>`). |
+| `device_list` | `[ { device_id, device_name, device_type, owner_username, owner_display_name, is_own_account, is_online } ]` | Emite al socket individual la lista de otros dispositivos en línea (excluyendo el propio). |
+| `send_offer` | `{ from_device_id, sender_device_name, file_name, file_size, file_type, transfer_id }` | Notificación interactiva de archivo entrante en el dispositivo receptor. |
+| `file_response` | `{ transfer_id, to_device_id, accept: true/false }` | Notifica al emisor si el receptor aceptó o rechazó la transferencia. |
+| `file_chunk` | `{ transfer_id, to_device_id, chunk_index, total_chunks, data }` | Retransmisión del fragmento binario hacia el dispositivo receptor. |
+| `chunk_ack` | `{ transfer_id, to_device_id, chunk_index }` | Acuse de recibo para control de flujo y cálculo de velocidad de transferencia. |
+| `clipboard_update` | `{ text, sender_device_id, sender_name }` | Sincronización del portapapeles compartido entre dispositivos del usuario. |
+| `transfer_error` | `{ error }` | Mensaje de error de validación ACL o estado desconectado del destino. |

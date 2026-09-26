@@ -49,23 +49,34 @@ def register_socket_handlers(sio):
 
     @sio.on("register_device")
     def handle_register_device(data):
-        """Legacy / dynamic device registration hook."""
+        """Dynamic device registration hook with UUID validation and session alignment."""
         user, device = verify_socket_session(db.session)
         sid = request.sid
 
-        if not user or not device:
-            # Create or resolve device for current session if logged in
+        if not user:
             user_id_str = session.get("user_id")
-            if user_id_str:
-                user = db.session.scalar(select(User).where(User.id == uuid.UUID(user_id_str)))
-                dev_id_str = (data.get("device_id") or "").strip()
-                if dev_id_str:
-                    try:
-                        device = db.session.scalar(select(Device).where(Device.id == uuid.UUID(dev_id_str)))
-                    except Exception:
-                        device = None
+            from app.models import to_uuid
+            user_uuid = to_uuid(user_id_str)
+            if user_uuid:
+                user = db.session.scalar(select(User).where(User.id == user_uuid, User.is_active == True))
+
+        if user and not device:
+            from app.models import to_uuid
+            dev_id_str = (data.get("device_id") or "").strip()
+            dev_uuid = to_uuid(dev_id_str)
+            if dev_uuid:
+                device = db.session.scalar(select(Device).where(Device.id == dev_uuid, Device.user_id == user.id, Device.is_active == True))
+            if not device:
+                # Fallback to the user's most recently active device
+                device = db.session.scalar(
+                    select(Device).where(Device.user_id == user.id, Device.is_active == True).order_by(Device.last_seen_at.desc())
+                )
+            if device:
+                session["device_id"] = str(device.id)
 
         if user and device:
+            device.mark_seen()
+            db.session.commit()
             presence_service.register_socket(
                 sid=sid,
                 user_id=str(user.id),
@@ -74,6 +85,7 @@ def register_socket_handlers(sio):
             )
             join_room(f"user_{user.id}")
             join_room(f"dev_{device.id}")
+            emit("session_ready", {"ok": True, "device_id": str(device.id), "user_id": str(user.id)})
             _broadcast_device_updates(user.id)
 
     @sio.on("send_offer")

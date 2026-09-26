@@ -28,4 +28,4 @@ Bienvenido a la documentación oficial y exhaustiva de **Filedrop / Enlace**. Es
    - **En Vivo (P2P por WebSockets)**: Transferencia directa dispositivo a dispositivo en tiempo real sin almacenamiento permanente en disco.
    - **Buzón Temporal**: Depósito temporal en el servidor con tiempo de vida (TTL) configurable para recolección diferida.
    - **Almacenamiento en la Nube S3**: Espacio de objetos persistente en la nube con aislamiento jerárquico por usuario (`users/{user_id}/`).
-4. **Multiplataforma y PWA**: Funciona en cualquier navegador moderno sin requerir clientes nativos obligatorios, con soporte para instalación como Progressive Web App (PWA) en Windows, macOS, Linux, Android e iOS.
+4. **Interfaz Unificada y PWA Multiplataforma**: Funciona en cualquier navegador web moderno mediante una sola interfaz adaptativa responsiva (`/`), sin bifurcación de URLs ni duplicación de código. Soporta instalación como Progressive Web App (PWA) en Windows, macOS, Linux, Android e iOS con notificaciones del sistema operativo.

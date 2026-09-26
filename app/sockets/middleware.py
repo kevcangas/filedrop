@@ -8,7 +8,7 @@ import uuid
 from flask import request, session
 from sqlalchemy import or_, select
 
-from app.models import Device, Friendship, FriendshipStatus, User
+from app.models import Device, Friendship, FriendshipStatus, User, to_uuid
 
 
 def verify_socket_session(db_session) -> Tuple[Optional[User], Optional[Device]]:
@@ -16,20 +16,28 @@ def verify_socket_session(db_session) -> Tuple[Optional[User], Optional[Device]]
     user_id = session.get("user_id")
     device_id = session.get("device_id")
 
-    if not user_id:
+    user_uuid = to_uuid(user_id)
+    if not user_uuid:
         return None, None
 
-    user = db_session.scalar(select(User).where(User.id == user_id, User.is_active == True))
+    user = db_session.scalar(select(User).where(User.id == user_uuid, User.is_active == True))
+    if not user:
+        return None, None
+
     device = None
-    if user and device_id:
+    dev_uuid = to_uuid(device_id)
+    if dev_uuid:
         device = db_session.scalar(
-            select(Device).where(Device.id == device_id, Device.user_id == user.id, Device.is_active == True)
+            select(Device).where(Device.id == dev_uuid, Device.user_id == user.id, Device.is_active == True)
         )
-    if user and not device:
+    if not device:
         # Fallback to the user's most recently active enrolled device
         device = db_session.scalar(
             select(Device).where(Device.user_id == user.id, Device.is_active == True).order_by(Device.last_seen_at.desc())
         )
+        if device:
+            session["device_id"] = str(device.id)
+
     return user, device
 
 

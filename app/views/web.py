@@ -93,20 +93,45 @@ def logout():
     return redirect("/login")
 
 
+def get_current_user_and_device():
+    """Retrieve currently authenticated user and active device from session."""
+    user_id = session.get("user_id")
+    device_id = session.get("device_id")
+    from app.models import User, Device, to_uuid
+    from app.extensions import db
+    from sqlalchemy import select
+    user = None
+    device = None
+    if user_id:
+        user = db.session.scalar(select(User).where(User.id == to_uuid(user_id), User.is_active == True))
+    if user and device_id:
+        device = db.session.scalar(
+            select(Device).where(Device.id == to_uuid(device_id), Device.user_id == user.id, Device.is_active == True)
+        )
+    if user and not device:
+        device = db.session.scalar(
+            select(Device).where(Device.user_id == user.id, Device.is_active == True).order_by(Device.last_seen_at.desc())
+        )
+        if device:
+            session["device_id"] = str(device.id)
+    return user, device
+
+
 @web_bp.route("/")
 @web_bp.route("/desktop")
 @web_bp.route("/pc")
 @web_bp.route("/host")
-def pc_view():
-    """Render desktop control panel."""
-    return render_template("pc.html")
-
-
 @web_bp.route("/mobile")
-def mobile_view():
-    """Render mobile client interface."""
-    default_type = "mobile"
-    return render_template("remote.html", default_type=default_type)
+def app_view():
+    """Render unified responsive FileDrop application for desktop and mobile clients."""
+    user, device = get_current_user_and_device()
+    user_data = user.to_dict() if user else {"username": "invitado", "display_name": "Invitado"}
+    device_data = device.to_dict() if device else {"id": "", "device_name": "Dispositivo", "device_type": "pc"}
+    return render_template(
+        "app.html",
+        current_user=user_data,
+        current_device=device_data,
+    )
 
 
 @web_bp.route("/manifest.json")

@@ -80,11 +80,11 @@ python3 server.py
 1. Abre `http://localhost:41823/` en tu navegador.
 2. Ve a la pestaña **"Crear Cuenta"**, escribe tus datos y dale un nombre a tu dispositivo (ej: *"MacBook Personal"*).
 
-### 2. Conectar tu Celular
-1. Conéctate a la misma red WiFi que la computadora anfitriona.
-2. Abre en el navegador del celular `http://<IP_ANFITRIONA>:41823/mobile`.
+### 2. Conectar tu Celular o Tablet
+1. Conéctate a la misma red WiFi o accede a través de tu URL pública/túnel.
+2. Desde la computadora, abre la pestaña **"⚙️ Ajustes"** y escanea el **Código QR** con la cámara de tu celular, o ingresa directamente a `http://<IP_ANFITRIONA>:41823/`.
 3. Inicia sesión con **la misma cuenta** e ingresa el nombre del móvil (ej: *"iPhone de Kevin"*).
-4. Tus dispositivos se sincronizarán inmediatamente bajo la categoría **"Mis Dispositivos"**.
+4. La aplicación se adapta automáticamente a la pantalla táctil de tu teléfono y ambos dispositivos se reconocerán mutuamente al instante para transferencias P2P directas.
 
 ### 3. Conectar con Amigos
 1. Abre el panel de **Amigos** en la barra superior.

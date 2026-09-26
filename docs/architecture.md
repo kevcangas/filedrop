@@ -149,3 +149,26 @@ Para garantizar aislamiento sin sobrecargar la base de datos con consultas por c
   users/{user_id}/devices/{device_id}/{uuid}_{filename}
   ```
 - Todas las URLs prefirmadas de descarga y subida se validan criptográficamente garantizando que ningún usuario acceda a objetos fuera de su prefijo.
+
+---
+
+## 6. Arquitectura del Cliente Web Unificado (Responsive First)
+
+La versión 2.0 consolida el frontend en una única aplicación web responsiva:
+
+- **Plantilla Única (`templates/app.html`)**:
+  - Reemplaza la bifurcación histórica `pc.html` / `remote.html`.
+  - Disposición adaptativa mediante CSS Grid: en pantallas de escritorio (>860px) despliega un panel de 2 columnas (pares a la izquierda, área de arrastre/transferencia a la derecha); en móviles (<860px) activa un sistema de pestañas deslizables táctiles.
+  - Inyección de contexto canónico en el renderizado inicial:
+    ```html
+    <script>
+      window.__FILEDROP_USER__ = {{ current_user | tojson | safe }};
+      window.__FILEDROP_DEVICE__ = {{ current_device | tojson | safe }};
+    </script>
+    ```
+- **Controlador Central (`static/app.js`)**:
+  - Unifica los controladores anteriores `pc.js` y `remote.js`.
+  - Se apoya en el motor de fragmentos binarios `static/transfer.js`.
+  - Sincroniza la presencia de dispositivos mediante UUIDs canónicos de base de datos (`Device.id`), asegurando que dos equipos con la misma cuenta iniciada se descubran de forma mutua e inmediata en tiempo real.
+- **Identidad de Sesión (`/api/devices/me`)**:
+  - Permite verificar y refrescar en cualquier momento la entidad de dispositivo registrada en PostgreSQL y vinculada a la cookie de sesión activa.

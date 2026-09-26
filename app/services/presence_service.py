@@ -120,7 +120,8 @@ class PresenceService:
                     "device_type": device.device_type.value if hasattr(device.device_type, "value") else str(device.device_type),
                     "owner_username": username,
                     "owner_display_name": display_name or username,
-                    "is_self": device.user_id == current_user_id,
+                    "is_own_account": device.user_id == current_user_id,
+                    "is_self": False,  # Deprecated: clients filter by device_id !== my_device_id
                     "is_online": is_online,
                 })
 

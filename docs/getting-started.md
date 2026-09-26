@@ -73,10 +73,10 @@ Al abrir `http://localhost:41823/` (o la IP local del host en tu red):
 4. Haz clic en **"Registrarse"**. El sistema creará tu cuenta, registrará el dispositivo y abrirá la consola principal.
 
 ### Paso 2: Conectar un Celular u Otro Dispositivo Propio
-1. Abre el navegador de tu celular en la misma red WiFi: `http://<IP_LOCAL>:41823/mobile`.
+1. Abre el navegador de tu celular en la misma red WiFi accediendo a `http://<IP_LOCAL>:41823/` o escanea el **Código QR** disponible en la pestaña **"⚙️ Ajustes"** de tu computadora.
 2. Inicia sesión con **la misma cuenta** que creaste antes.
 3. Asigna un nombre al dispositivo (ejemplo: *"iPhone de Kevin"*).
-4. Ambos dispositivos aparecerán mutuamente en la lista con el distintivo **"Mis Dispositivos"**. El intercambio de archivos y sincronización de portapapeles entre dispositivos propios es directo e inmediato.
+4. La interfaz se adaptará de forma responsiva al formato táctil de tu teléfono y ambos dispositivos aparecerán mutuamente en la lista con el distintivo **"Esta cuenta"**. El intercambio de archivos y sincronización de portapapeles entre dispositivos propios es directo e inmediato.
 
 ### Paso 3: Invitar y Conectar Amigos
 1. Haz clic en el botón **"Amigos"** (o ícono de usuario) en la barra superior para abrir el panel lateral de amigos.
