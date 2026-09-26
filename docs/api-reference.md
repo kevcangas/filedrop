@@ -168,6 +168,29 @@ Lista todos los dispositivos vinculados a la cuenta del usuario autenticado, ind
   }
   ```
 
+#### `GET /api/devices/visible`
+Devuelve la lista unificada de todos los dispositivos visibles para el usuario autenticado (incluyendo terminales de su misma cuenta y dispositivos de amigos con amistad aceptada), acompañados de su estado de presencia en tiempo real (`is_online`), última conexión (`last_seen_at`) y propiedad (`is_own_account`).
+
+- **Response `200 OK`**:
+  ```json
+  {
+    "ok": true,
+    "current_device_id": "e5f6a7b8-...",
+    "devices": [
+      {
+        "device_id": "5a8a1483-...",
+        "device_name": "iPhone 15",
+        "device_type": "mobile",
+        "owner_username": "kevin",
+        "owner_display_name": "Kevin Cangas",
+        "is_own_account": true,
+        "is_online": true,
+        "last_seen_at": "2026-09-26T15:28:10Z"
+      }
+    ]
+  }
+  ```
+
 #### `PATCH /api/devices/<device_id>/rename`
 Modifica el nombre legible de un dispositivo perteneciente al usuario.
 
