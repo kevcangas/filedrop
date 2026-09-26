@@ -171,6 +171,23 @@ def register_socket_handlers(sio):
 
 
 def _broadcast_device_updates(user_id: uuid.UUID):
-    """Emit updated visible devices list to the user's active sockets."""
-    visible = presence_service.get_visible_devices_for_user(db.session, user_id)
-    socketio.emit("devices_updated", {"devices": visible}, room=f"user_{user_id}")
+    """Emit updated visible devices list to the user's active sockets and accepted friends."""
+    from app.models import Friendship, FriendshipStatus
+    friend_stmt = select(Friendship).where(
+        (Friendship.requester_id == user_id) | (Friendship.addressee_id == user_id),
+        Friendship.status == FriendshipStatus.ACCEPTED,
+    )
+    friendships = db.session.scalars(friend_stmt).all()
+    target_user_ids = {user_id}
+    for f in friendships:
+        target_user_ids.add(f.addressee_id if f.requester_id == user_id else f.requester_id)
+
+    for uid in target_user_ids:
+        visible = presence_service.get_visible_devices_for_user(db.session, uid)
+        socketio.emit("devices_updated", {"devices": visible}, room=f"user_{uid}")
+        with presence_service._lock:
+            sids = [sid for sid, info in presence_service._sid_to_info.items() if info.get("user_id") == str(uid)]
+            for sid in sids:
+                dev_id = presence_service._sid_to_info[sid].get("device_id")
+                other_devices = [d for d in visible if d.get("is_online") and d.get("device_id") != dev_id]
+                socketio.emit("device_list", other_devices, room=sid)
