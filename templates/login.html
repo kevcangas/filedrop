@@ -3,209 +3,360 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Enlace · Acceso</title>
+<title>Enlace · Portal de Acceso</title>
 <link rel="stylesheet" href="/static/style.css">
 <style>
-  /* ── panel de avisos por correo: selector Sí/No + tarjetas de config ── */
-  .option-desc {
-    font-size: 12.5px;
-    color: var(--text-muted);
-    margin: 0 0 12px;
-    line-height: 1.45;
+  :root {
+    --auth-glow: rgba(93, 169, 255, 0.15);
   }
-  .option-toggle { display: flex; gap: 8px; }
-  .option-toggle button { flex: 1; }
-
-  .email-cfg { display: none; margin-top: 14px; }
-  .email-cfg.visible { display: block; }
-
-  /* tarjetas pequeñas dentro del panel, para que varios campos juntos no
-     se vean como una sola pared de inputs */
-  .subcard {
+  body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    margin: 0;
+    padding: 20px;
+    background: radial-gradient(circle at 50% 20%, #172436 0%, var(--bg) 75%);
+  }
+  .auth-shell {
+    width: 100%;
+    max-width: 440px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 28px;
+    box-shadow: 0 16px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.05);
+    backdrop-filter: blur(12px);
+  }
+  .brand-header {
+    text-align: center;
+    margin-bottom: 24px;
+  }
+  .brand-title {
+    font-size: 26px;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    color: var(--text);
+    margin: 0;
+  }
+  .brand-subtitle {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin: 6px 0 0;
+  }
+  .auth-tabs {
+    display: flex;
+    background: var(--panel-2);
+    border-radius: 10px;
+    padding: 4px;
+    margin-bottom: 20px;
+    border: 1px solid var(--border);
+  }
+  .auth-tab {
+    flex: 1;
+    padding: 9px 12px;
+    font-size: 13px;
+    font-weight: 600;
+    text-align: center;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  .auth-tab.active {
+    background: var(--accent);
+    color: #0c1420;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+  }
+  .tab-pane {
+    display: none;
+  }
+  .tab-pane.active {
+    display: block;
+    animation: fadeIn 0.25s ease-out;
+  }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .input-group {
+    margin-bottom: 16px;
+  }
+  .input-group label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .input-group input, .input-group select {
+    width: 100%;
+    padding: 11px 14px;
     background: var(--panel-2);
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: 9px;
+    color: var(--text);
+    font-size: 14px;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  .input-group input:focus, .input-group select:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--auth-glow);
+  }
+  .btn-submit {
+    width: 100%;
     padding: 12px;
+    font-size: 14px;
+    font-weight: 700;
+    background: var(--accent);
+    color: #0c1420;
+    border: none;
+    border-radius: 9px;
+    cursor: pointer;
+    transition: filter 0.2s, transform 0.1s;
+    margin-top: 8px;
   }
-  .subcard + .subcard { margin-top: 10px; }
-  .subcard-title {
-    font-family: var(--mono);
-    font-size: 10px;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--text-muted);
-    margin: 0 0 10px;
+  .btn-submit:hover {
+    filter: brightness(1.1);
   }
-  .subcard label { margin-top: 8px; }
-  .subcard > div:first-of-type label { margin-top: 0; }
-
-  .row-split { display: flex; gap: 8px; }
-  .row-split > div { flex: 1; }
-  .hint-small { font-size: 11px; color: var(--text-muted); margin: 4px 0 0; line-height: 1.4; }
-
-  .login-error {
+  .btn-submit:active {
+    transform: scale(0.98);
+  }
+  .auth-error {
+    display: none;
+    background: rgba(224, 87, 74, 0.12);
+    border: 1px solid rgba(224, 87, 74, 0.35);
     color: var(--danger);
     font-size: 13px;
-    margin: 0;
-    background: rgba(224, 87, 74, 0.08);
-    border: 1px solid rgba(224, 87, 74, 0.3);
     border-radius: 8px;
-    padding: 8px 10px;
+    padding: 10px 12px;
+    margin-bottom: 16px;
   }
-
-  details > summary { font-size: 12px; color: var(--text-muted); cursor: pointer; }
-  details[open] > summary { margin-bottom: 8px; }
+  .legacy-drawer {
+    margin-top: 24px;
+    padding-top: 18px;
+    border-top: 1px solid var(--border);
+  }
+  .legacy-drawer summary {
+    font-size: 12px;
+    color: var(--text-muted);
+    cursor: pointer;
+    user-select: none;
+    text-align: center;
+  }
+  .device-hint {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 4px;
+  }
 </style>
 </head>
-<body>
+<body class="role-guest">
 
-<div class="mobile-shell" style="margin-top: 8vh;">
-  <div class="brand" style="justify-content:center;">
-    <span class="brand-mark">ENLACE</span>
+<div class="auth-shell">
+  <div class="brand-header">
+    <h1 class="brand-title">ENLACE</h1>
+    <p class="brand-subtitle">Transferencia segura entre dispositivos y amigos</p>
   </div>
 
-  <form method="POST" action="/login" class="stack">
-    <input type="hidden" name="next" value="{{ next_path }}">
+  <div class="auth-tabs">
+    <button type="button" class="auth-tab active" id="tab-login-btn" onclick="switchTab('login')">Iniciar Sesión</button>
+    <button type="button" class="auth-tab" id="tab-register-btn" onclick="switchTab('register')">Crear Cuenta</button>
+  </div>
 
-    <!-- ── panel 1: contraseña ── -->
-    <div class="panel">
-      <p class="panel-title">Contraseña de acceso</p>
-      <div class="stack">
-        <div>
-          <label for="password">Escribe la contraseña para entrar</label>
-          <input type="password" id="password" name="password" autofocus autocomplete="current-password">
-        </div>
-        {% if error %}
-        <p class="login-error">{{ error }}</p>
-        {% endif %}
+  <div id="auth-alert" class="auth-error"></div>
+
+  <!-- ── PANEL INICIAR SESIÓN ── -->
+  <div id="pane-login" class="tab-pane active">
+    <form id="form-login" onsubmit="handleLogin(event)">
+      <div class="input-group">
+        <label for="login-ident">Usuario o Correo</label>
+        <input type="text" id="login-ident" required autofocus autocomplete="username" placeholder="tu-usuario o email">
       </div>
-    </div>
-
-    {% if es_anfitriona %}
-    <!-- ── panel 2: avisos por correo (opt-in, solo anfitriona) ── -->
-    <div class="panel">
-      <p class="panel-title">Avisos por correo</p>
-      <p class="option-desc">
-        Opcional: recibe la contraseña y las direcciones de acceso en tu correo
-        cada cierto tiempo, útil si sueles olvidar la clave o el enlace.
-      </p>
-
-      <input type="hidden" id="chk-email-activo" name="email_activo" value="">
-
-      <div class="option-toggle" id="email-toggle">
-        <button type="button" class="primary" id="opt-off">No, gracias</button>
-        <button type="button" id="opt-on">Sí, quiero avisos</button>
+      <div class="input-group">
+        <label for="login-pass">Contraseña</label>
+        <input type="password" id="login-pass" required autocomplete="current-password" placeholder="••••••••">
       </div>
-
-      <div class="email-cfg" id="email-cfg-block">
-
-        <div class="subcard">
-          <p class="subcard-title">Destino</p>
-          <div>
-            <label for="email_destino">Correo donde recibirás los avisos</label>
-            <input type="email" id="email_destino" name="email_destino"
-                   placeholder="tuemail@gmail.com" autocomplete="email">
-          </div>
-        </div>
-
-        <div class="subcard">
-          <p class="subcard-title">Cuenta que envía</p>
-          <div>
-            <label for="smtp_user">Tu cuenta de correo emisora (Gmail, Outlook…)</label>
-            <input type="email" id="smtp_user" name="smtp_user"
-                   placeholder="tucuenta@gmail.com" autocomplete="username">
-          </div>
-          <div>
-            <label for="smtp_pass">Contraseña de aplicación</label>
-            <input type="password" id="smtp_pass" name="smtp_pass"
-                   placeholder="clave de app, no tu contraseña normal"
-                   autocomplete="new-password">
-            <p class="hint-small">
-              Gmail: <a href="https://myaccount.google.com/apppasswords"
-                        target="_blank" rel="noopener">myaccount.google.com/apppasswords</a><br>
-              Outlook / Hotmail: Configuración → Seguridad → Contraseñas de aplicación
-            </p>
-          </div>
-
-          <details>
-            <summary>Opciones avanzadas de SMTP (solo si no usas Gmail)</summary>
-            <div class="row-split">
-              <div>
-                <label for="smtp_host">Servidor SMTP</label>
-                <input type="text" id="smtp_host" name="smtp_host"
-                       placeholder="smtp.gmail.com" value="smtp.gmail.com">
-              </div>
-              <div style="max-width:90px;">
-                <label for="smtp_port">Puerto</label>
-                <input type="number" id="smtp_port" name="smtp_port"
-                       placeholder="587" value="587" min="1" max="65535">
-              </div>
-            </div>
-          </details>
-        </div>
-
-        <div class="subcard">
-          <p class="subcard-title">Frecuencia</p>
-          <div class="row-split">
-            <div>
-              <label for="intervalo">Enviar cada</label>
-              <select id="intervalo" name="intervalo">
-                <option value="1" selected>1 hora</option>
-                <option value="2">2 horas</option>
-                <option value="6">6 horas</option>
-                <option value="12">12 horas</option>
-                <option value="24">24 horas</option>
-              </select>
-            </div>
-            <div>
-              <label for="duracion">Mantener activo</label>
-              <select id="duracion" name="duracion">
-                <option value="0" selected>Hasta desactivar</option>
-                <option value="24">24 horas</option>
-                <option value="72">3 días</option>
-                <option value="168">7 días</option>
-              </select>
-            </div>
-          </div>
-          <p class="hint-small">
-            El primer correo se manda al entrar. Luego se repite según el intervalo.
-            Puedes desactivarlo desde el panel de la computadora anfitriona.
-          </p>
-        </div>
-
+      <div class="input-group">
+        <label for="login-device">Nombre de este dispositivo</label>
+        <input type="text" id="login-device" placeholder="Ej: Mi Laptop, Celular Personal">
+        <p class="device-hint">Cómo verán este dispositivo tus amigos conectados</p>
       </div>
-      <!-- /email-cfg-block -->
-    </div>
-    {% endif %}
+      <button type="submit" class="btn-submit" id="btn-login-submit">Entrar</button>
+    </form>
+  </div>
 
-    <button class="primary" type="submit" style="width:100%;">Entrar</button>
-  </form>
+  <!-- ── PANEL CREAR CUENTA ── -->
+  <div id="pane-register" class="tab-pane">
+    <form id="form-register" onsubmit="handleRegister(event)">
+      <div class="input-group">
+        <label for="reg-username">Nombre de Usuario</label>
+        <input type="text" id="reg-username" required autocomplete="username" placeholder="juan_perez">
+      </div>
+      <div class="input-group">
+        <label for="reg-email">Correo Electrónico</label>
+        <input type="email" id="reg-email" required autocomplete="email" placeholder="usuario@correo.com">
+      </div>
+      <div class="input-group">
+        <label for="reg-pass">Contraseña (Mínimo 8 caracteres)</label>
+        <input type="password" id="reg-pass" required minlength="8" autocomplete="new-password" placeholder="••••••••">
+      </div>
+      <div class="input-group">
+        <label for="reg-device">Nombre de tu Dispositivo</label>
+        <input type="text" id="reg-device" placeholder="Ej: Celular Galaxy, PC Oficina">
+      </div>
+      <div class="input-group">
+        <label for="reg-type">Tipo de Dispositivo</label>
+        <select id="reg-type">
+          <option value="pc">Computadora / Laptop (PC)</option>
+          <option value="mobile">Teléfono Móvil (Celular)</option>
+          <option value="tablet">Tableta</option>
+          <option value="server">Servidor</option>
+        </select>
+      </div>
+      <button type="submit" class="btn-submit" id="btn-reg-submit">Registrarme</button>
+    </form>
+  </div>
 
-  <p class="empty-hint" style="text-align:center;">
-    Pídele la contraseña a quien esté corriendo el servidor de Enlace.
-  </p>
+  <!-- ── MODO LEGADO (CONTRASEÑA COMPARTIDA DEL SERVIDOR) ── -->
+  <details class="legacy-drawer">
+    <summary>¿Prefieres entrar con contraseña local del servidor?</summary>
+    <form method="POST" action="/login" style="margin-top:14px;">
+      <input type="hidden" name="next" value="{{ next_path or '/' }}">
+      <div class="input-group">
+        <label for="legacy-pass">Contraseña del Servidor</label>
+        <input type="password" id="legacy-pass" name="password" placeholder="Contraseña de la máquina anfitriona">
+      </div>
+      <button type="submit" class="btn-submit" style="background:var(--panel-2); color:var(--text); border:1px solid var(--border);">Acceso Rápido Local</button>
+    </form>
+  </details>
 </div>
 
 <script>
-(function () {
-  var optOff = document.getElementById('opt-off');
-  var optOn = document.getElementById('opt-on');
-  if (!optOff || !optOn) return;  // login de invitado: no hay panel de correo que armar
-
-  function setEmailOption(active) {
-    optOff.classList.toggle('primary', !active);
-    optOn.classList.toggle('primary', active);
-    document.getElementById('chk-email-activo').value = active ? '1' : '';
-    document.getElementById('email-cfg-block').classList.toggle('visible', active);
-    // los campos solo son obligatorios si el bloque esta visible
-    ['email_destino', 'smtp_user', 'smtp_pass'].forEach(function (id) {
-      document.getElementById(id).required = active;
-    });
+  function getFingerprint() {
+    let fp = localStorage.getItem("enlace_device_fingerprint");
+    if (!fp) {
+      fp = 'fp_' + Math.random().toString(36).substring(2) + Date.now().toString(36);
+      localStorage.setItem("enlace_device_fingerprint", fp);
+    }
+    return fp;
   }
-  optOff.onclick = function () { setEmailOption(false); };
-  optOn.onclick = function () { setEmailOption(true); };
-})();
-</script>
 
+  function autoDetectDeviceName() {
+    const ua = navigator.userAgent;
+    let name = "Navegador Web";
+    if (/android/i.test(ua)) name = "Celular Android";
+    else if (/iphone/i.test(ua)) name = "iPhone";
+    else if (/ipad/i.test(ua)) name = "iPad";
+    else if (/macintosh|mac os x/i.test(ua)) name = "MacBook";
+    else if (/windows/i.test(ua)) name = "PC Windows";
+    else if (/linux/i.test(ua)) name = "PC Linux";
+    return name;
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    const defaultName = autoDetectDeviceName();
+    document.getElementById("login-device").value = defaultName;
+    document.getElementById("reg-device").value = defaultName;
+    if (/android|iphone|ipad/i.test(navigator.userAgent)) {
+      document.getElementById("reg-type").value = "mobile";
+    }
+  });
+
+  function switchTab(tab) {
+    document.getElementById("auth-alert").style.display = "none";
+    if (tab === 'login') {
+      document.getElementById("pane-login").classList.add("active");
+      document.getElementById("pane-register").classList.remove("active");
+      document.getElementById("tab-login-btn").classList.add("active");
+      document.getElementById("tab-register-btn").classList.remove("active");
+    } else {
+      document.getElementById("pane-login").classList.remove("active");
+      document.getElementById("pane-register").classList.add("active");
+      document.getElementById("tab-login-btn").classList.remove("active");
+      document.getElementById("tab-register-btn").classList.add("active");
+    }
+  }
+
+  function showError(msg) {
+    const alert = document.getElementById("auth-alert");
+    alert.textContent = msg;
+    alert.style.display = "block";
+  }
+
+  async function handleLogin(e) {
+    e.preventDefault();
+    const btn = document.getElementById("btn-login-submit");
+    btn.disabled = true;
+    btn.textContent = "Verificando...";
+
+    try {
+      const payload = {
+        identifier: document.getElementById("login-ident").value,
+        password: document.getElementById("login-pass").value,
+        device_name: document.getElementById("login-device").value,
+        device_fingerprint: getFingerprint(),
+      };
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        showError(data.error || "Error al iniciar sesión.");
+        btn.disabled = false;
+        btn.textContent = "Entrar";
+        return;
+      }
+      const urlParams = new URLSearchParams(window.location.search);
+      window.location.href = urlParams.get("next") || "/";
+    } catch (err) {
+      showError("Error de conexión con el servidor.");
+      btn.disabled = false;
+      btn.textContent = "Entrar";
+    }
+  }
+
+  async function handleRegister(e) {
+    e.preventDefault();
+    const btn = document.getElementById("btn-reg-submit");
+    btn.disabled = true;
+    btn.textContent = "Creando cuenta...";
+
+    try {
+      const payload = {
+        username: document.getElementById("reg-username").value,
+        email: document.getElementById("reg-email").value,
+        password: document.getElementById("reg-pass").value,
+        device_name: document.getElementById("reg-device").value,
+        device_type: document.getElementById("reg-type").value,
+        device_fingerprint: getFingerprint(),
+      };
+      const res = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        showError(data.error || "Error en el registro.");
+        btn.disabled = false;
+        btn.textContent = "Registrarme";
+        return;
+      }
+      window.location.href = "/";
+    } catch (err) {
+      showError("Error de conexión con el servidor.");
+      btn.disabled = false;
+      btn.textContent = "Registrarme";
+    }
+  }
+</script>
 </body>
 </html>

@@ -28,10 +28,12 @@
   </div>
 
   <!-- Barra de pestañas principal móvil -->
-  <div class="page-tabs" style="margin-bottom:16px;">
-    <button type="button" class="primary" id="tab-btn-s3">☁️ S3 Nube</button>
+  <div class="page-tabs" style="margin-bottom:16px; flex-wrap:wrap;">
+    <button type="button" class="primary" id="tab-btn-s3">☁️ S3</button>
     <button type="button" id="tab-btn-transfer">📤 Transferir</button>
     <button type="button" id="tab-btn-buzon">📥 Buzón</button>
+    <button type="button" id="tab-btn-friends">👥 Amigos</button>
+    <button type="button" id="tab-btn-logs">📋 Logs</button>
     <button type="button" id="tab-btn-connect">⚙️ Conexión</button>
   </div>
 
@@ -227,6 +229,12 @@
       </div>
     </div>
   </div>
+
+  <!-- ══════════════════ PESTAÑA: AMIGOS Y DISPOSITIVOS ══════════════════ -->
+  <div id="tab-friends-content" class="stack" style="display:none;"></div>
+
+  <!-- ══════════════════ PESTAÑA: LOGS Y ACTIVIDAD ══════════════════ -->
+  <div id="tab-logs-content" class="stack" style="display:none;"></div>
 </div>
 
 <!-- Modal de oferta de archivo entrante -->
@@ -266,6 +274,25 @@
 <script src="/static/jszip.min.js?v=5"></script>
 <script src="/static/transfer.js?v=5"></script>
 <script src="/static/notifications.js?v=5"></script>
+<script src="/static/activity-logger.js?v=5"></script>
+<script src="/static/friends.js?v=5"></script>
 <script src="/static/remote.js?v=5"></script>
+<script>
+  // Wire mobile friends & logs tabs
+  const tabBtnFriends = document.getElementById("tab-btn-friends");
+  const tabBtnLogs = document.getElementById("tab-btn-logs");
+  if (tabBtnFriends) {
+    tabBtnFriends.addEventListener("click", () => {
+      if (typeof setMobileTab === "function") setMobileTab("friends");
+      if (window.friendsManager) window.friendsManager.init("tab-friends-content");
+    });
+  }
+  if (tabBtnLogs) {
+    tabBtnLogs.addEventListener("click", () => {
+      if (typeof setMobileTab === "function") setMobileTab("logs");
+      if (window.activityLogger) window.activityLogger.init("tab-logs-content");
+    });
+  }
+</script>
 </body>
 </html>

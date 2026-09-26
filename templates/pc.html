@@ -42,6 +42,8 @@
 <div class="page-tabs">
   <button type="button" class="primary" id="tab-btn-transferir">📤 Transferir</button>
   <button type="button" id="tab-btn-s3">☁️ Almacenamiento S3</button>
+  <button type="button" id="tab-btn-friends">👥 Amigos</button>
+  <button type="button" id="tab-btn-logs">📋 Logs y Actividad</button>
   <button type="button" id="tab-btn-config">⚙️ Configuración</button>
 </div>
 
@@ -326,6 +328,12 @@
 
 </div>
 
+<!-- ══════════════════ PESTAÑA: AMIGOS Y DISPOSITIVOS ══════════════════ -->
+<div class="stack" id="tab-friends" style="display:none; max-width:1000px; margin:0 auto;"></div>
+
+<!-- ══════════════════ PESTAÑA: LOGS Y ACTIVIDAD ══════════════════ -->
+<div class="stack" id="tab-logs" style="display:none; max-width:1000px; margin:0 auto;"></div>
+
 <!-- Modal de oferta de archivo entrante -->
 <div id="offer-modal" class="modal-backdrop" style="display:none;">
   <div class="modal">
@@ -364,30 +372,46 @@
 <script src="/static/transfer.js?v=5"></script>
 <script src="/static/notifications.js?v=5"></script>
 <script src="/static/pc.js?v=5"></script>
+<script src="/static/activity-logger.js?v=5"></script>
+<script src="/static/friends.js?v=5"></script>
 
 <script>
 /* ══════════════════════════════════════════════════════════════════
-   PESTAÑAS: Transferir / Almacenamiento S3 / Configuración
+   PESTAÑAS: Transferir / Almacenamiento S3 / Amigos / Logs / Config
    ══════════════════════════════════════════════════════════════════ */
 (function pageTabs() {
   var btnTransferir = document.getElementById('tab-btn-transferir');
   var btnS3         = document.getElementById('tab-btn-s3');
+  var btnFriends    = document.getElementById('tab-btn-friends');
+  var btnLogs       = document.getElementById('tab-btn-logs');
   var btnConfig     = document.getElementById('tab-btn-config');
   var panelTransferir = document.getElementById('tab-transferir');
   var panelS3         = document.getElementById('tab-s3');
+  var panelFriends    = document.getElementById('tab-friends');
+  var panelLogs       = document.getElementById('tab-logs');
   var panelConfig     = document.getElementById('tab-config');
 
   function setTab(tab) {
     btnTransferir.classList.toggle('primary', tab === 'transferir');
     if (btnS3) btnS3.classList.toggle('primary', tab === 's3');
+    if (btnFriends) btnFriends.classList.toggle('primary', tab === 'friends');
+    if (btnLogs) btnLogs.classList.toggle('primary', tab === 'logs');
     btnConfig.classList.toggle('primary', tab === 'config');
 
     panelTransferir.style.display = (tab === 'transferir') ? '' : 'none';
     if (panelS3) panelS3.style.display = (tab === 's3') ? '' : 'none';
+    if (panelFriends) panelFriends.style.display = (tab === 'friends') ? '' : 'none';
+    if (panelLogs) panelLogs.style.display = (tab === 'logs') ? '' : 'none';
     panelConfig.style.display = (tab === 'config') ? '' : 'none';
 
     if (tab === 's3' && typeof loadS3Explorer === 'function') {
       loadS3Explorer();
+    }
+    if (tab === 'friends' && window.friendsManager) {
+      window.friendsManager.init('tab-friends');
+    }
+    if (tab === 'logs' && window.activityLogger) {
+      window.activityLogger.init('tab-logs');
     }
     if (tab === 'config' && typeof refreshS3ConfigStatus === 'function') {
       refreshS3ConfigStatus();
@@ -396,7 +420,13 @@
 
   btnTransferir.addEventListener('click', function () { setTab('transferir'); });
   if (btnS3) btnS3.addEventListener('click', function () { setTab('s3'); });
+  if (btnFriends) btnFriends.addEventListener('click', function () { setTab('friends'); });
+  if (btnLogs) btnLogs.addEventListener('click', function () { setTab('logs'); });
   btnConfig.addEventListener('click', function () { setTab('config'); });
+
+  if (window.activityLogger) {
+    window.activityLogger.init('tab-logs');
+  }
 })();
 
 

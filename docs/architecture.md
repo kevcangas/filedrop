@@ -1,79 +1,151 @@
-# 🏛️ Arquitectura del Sistema
+# 🏛️ Arquitectura del Sistema: Enlace (Filedrop)
 
-Filedrop / Enlace es una plataforma web ligera construida con **Flask** y **Flask-SocketIO** para la transferencia de archivos, compartición de portapapeles y notificaciones entre dispositivos conectados a una misma red local o mediante túneles seguros.
+**Enlace (Filedrop)** es una plataforma web y PWA para transferencia de archivos de alta velocidad, sincronización segura de portapapeles y almacenamiento en la nube, construida sobre **Flask**, **Flask-SocketIO**, **SQLAlchemy** y **PostgreSQL**.
 
 ---
 
-## 1. Visión General de Componentes
+## 1. Visión General de la Topología de Contenedores
 
 ```
 +-----------------------------------------------------------------------------------+
 |                              DISPOSITIVOS CLIENTES                                |
-|   (Celulares Android/iOS, Laptops Windows/macOS/Linux - PWA en Navegadores Web)   |
+|    (Celulares Android/iOS, Laptops Windows/macOS/Linux - PWA en Navegadores)      |
 +-----------------------------------------------------------------------------------+
            │                                            ▲                    ▲
-    HTTP / REST                                    Socket.IO             Presigned S3
-  (Login, Subidas,                                (Presencia,            (Descargas
-   Explorador S3)                                 Chunks P2P)             Directas)
-           │                                            │                    │
+    HTTP / REST (JSON)                             Socket.IO             Presigned S3
+ (Auth, Amigos, Buzón, S3)                        (Presencia,            (Descargas
+           │                                      Chunks P2P)             Directas)
            ▼                                            ▼                    │
-+---------------------------------------------------------------------+      │
-|                           SERVIDOR ENLACE                           |      │
-|                             (server.py)                             |      │
++─────────────────────────────────────────────────────────────────────+      │
+|                    CONTENEDOR DE LA APLICACIÓN                      |      │
+|                              (enlace)                               |      │
 |                                                                     |      │
-|   +---------------------+   +-------------------+   +-----------+   |      │
-|   |   Flask Web Server  |   | Socket.IO Manager |   | S3 Module |   |      │
-|   +---------------------+   +-------------------+   +-----------+   |      │
+|   +────────────────────+   +───────────────────+   +────────────+   |      │
+|   |  Flask App Factory |   | Presence & Sockets|   | S3 Service |   |      │
+|   | (app/api, app/views|   |  (app/sockets)    |   | (boto3 S3) |   |      │
+|   +────────────────────+   +───────────────────+   +────────────+   |      │
 |              │                        │                   │         |      │
-|              ▼                        ▼                   ▼         |      │
-|       [ Disco Local ]          [ Memoria RAM ]      [ boto3 S3 ]    |      │
-|      (buzon/ con TTL)         (state["devices"])          │         |      │
-+-----------------------------------------------------------│---------+      │
-                                                            │                │
-                                                            ▼                │
-                                                +──────────────────────+     │
-                                                |   BUCKET S3 / CLOUD  |─────┘
-                                                |  (AWS, MinIO, R2)    |
-                                                +──────────────────────+
+|              ├────────────────────────┴────────┐          │         |      │
+|              ▼                                 ▼          │         |      │
+|      [ Disco Local ]                    [ Memoria RAM ]   │         |      │
+|     (buzon/ con TTL)                   (sid ↔ device_id)  │         |      │
++──────────────│────────────────────────────────────────────│─────────+      │
+               │                                            │                │
+               ▼                                            ▼                │
++──────────────────────────────+                +──────────────────────+     │
+|    CONTENEDOR POSTGRESQL     |                |   BUCKET S3 / CLOUD  |─────┘
+|     (enlace_postgres)        |                |  (AWS, MinIO, R2)    |
+| (Usuarios, Amigos, Disposit.)|                | users/{user_id}/...  |
++──────────────────────────────+                +──────────────────────+
 ```
 
 ---
 
-## 2. Los Tres Canales de Transferencia
+## 2. Modelo Relacional de Datos (ERD)
 
-### Canal 1: Transferencia en Vivo (P2P / WebSockets)
-- **Caso de uso**: Enviar fotos, videos o archivos cuando ambos dispositivos están en la pantalla al mismo tiempo.
-- **Mecanismo**:
-  1. El emisor envía un evento `send_offer` con el nombre, tamaño y tipo de archivo.
-  2. El receptor recibe la oferta y puede aceptarla o rechazarla.
-  3. Al aceptar, el archivo se transmite en trozos (*chunks*) binarios directamente a través de WebSocket (`file_chunk`) con acuses de recibo (`chunk_ack`).
-  4. Los datos fluyen por la memoria RAM del servidor sin tocar el disco duro.
+La persistencia de identidades, relaciones de confianza y auditoría reside en PostgreSQL 16:
 
-### Canal 2: Buzón del Servidor (Temporal con TTL)
-- **Caso de uso**: Guardar un archivo cuando el receptor no está conectado en ese momento o para descargarlo más tarde.
-- **Mecanismo**:
-  1. El archivo se envía mediante `POST /api/buzon/enviar` (soporta empaquetado automático en `.zip` para carpetas o múltiples archivos).
-  2. Se almacena localmente en la carpeta `buzon/` del servidor con un prefijo UUID único (`<uuid>__<nombre>`).
-  3. Un hilo daemon en segundo plano (`mailbox_cleanup_loop`) revisa periódicamente y elimina de forma automática los archivos cuyo tiempo de vida supere `ENLACE_BUZON_HORAS` (por defecto 72 horas).
+```
+┌─────────────────────────────────┐          1:N          ┌───────────────────────────────────┐
+│              users              ├──────────────────────►│              devices              │
+├─────────────────────────────────┤                       ├───────────────────────────────────┤
+│ id (PK, UUID)                   │                       │ id (PK, UUID)                     │
+│ username (VARCHAR(50), UNIQUE)  │                       │ user_id (FK -> users.id, CASCADE) │
+│ email (VARCHAR(255), UNIQUE)    │                       │ device_name (VARCHAR(100))        │
+│ password_hash (VARCHAR(255))    │                       │ device_type (ENUM: pc, mobile...) │
+│ display_name (VARCHAR(100))     │                       │ device_fingerprint (VARCHAR(128)) │
+│ is_active (BOOLEAN)             │                       │ last_seen_at (TIMESTAMP WITH TZ)  │
+│ created_at / updated_at         │                       │ is_active (BOOLEAN)               │
+└────────────────┬────────────────┘                       └───────────────────────────────────┘
+                 │
+                 │ 1:N (requester_id / addressee_id)
+                 ▼
+┌────────────────────────────────────────────────────────┐
+│                      friendships                       │
+├────────────────────────────────────────────────────────┤
+│ id (PK, UUID)                                          │
+│ requester_id (FK -> users.id, CASCADE)                 │
+│ addressee_id (FK -> users.id, CASCADE)                 │
+│ status (ENUM: PENDING, ACCEPTED, DECLINED, BLOCKED)    │
+│ created_at / updated_at (TIMESTAMP WITH TIME ZONE)     │
+└────────────────────────────────────────────────────────┘
 
-### Canal 3: Almacenamiento en la Nube S3 (Persistente)
-- **Caso de uso**: Archivos que se desean almacenar de forma definitiva o permanente, accesibles desde cualquier navegador sin límites de caducidad local.
-- **Mecanismo**:
-  1. El archivo se sube vía `POST /api/s3/upload` (con carpeta/sub-prefijo opcional).
-  2. El servidor lo transmite al bucket configurado dentro del prefijo del usuario con metadatos asociados.
-  3. Los archivos se gestionan desde la pestaña `☁️ Almacenamiento S3` del cliente web, permitiendo visualización, navegación por carpetas, generación de enlaces temporales de descarga segura y eliminación.
+┌────────────────────────────────────────────────────────┐
+│                     mailbox_items                      │
+├────────────────────────────────────────────────────────┤
+│ id (PK, UUID)                                          │
+│ sender_user_id (FK -> users.id, SET NULL)              │
+│ recipient_user_id (FK -> users.id, CASCADE)            │
+│ storage_type (ENUM: LOCAL, S3)                         │
+│ file_name (VARCHAR(255))                               │
+│ file_path (VARCHAR(500))                               │
+│ file_size (BIGINT)                                     │
+│ expires_at (TIMESTAMP WITH TIME ZONE)                  │
+│ is_downloaded (BOOLEAN)                                │
+└────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────┐
+│                     transfer_logs                      │
+├────────────────────────────────────────────────────────┤
+│ id (PK, UUID)                                          │
+│ sender_device_id (FK -> devices.id, SET NULL)          │
+│ receiver_device_id (FK -> devices.id, SET NULL)        │
+│ channel (ENUM: P2P_STREAM, MAILBOX, S3_SHARE)          │
+│ file_name (VARCHAR(255))                               │
+│ file_size (BIGINT)                                     │
+│ status (ENUM: COMPLETED, CANCELLED, FAILED)            │
+│ created_at (TIMESTAMP WITH TIME ZONE)                  │
+└────────────────────────────────────────────────────────┘
+```
 
 ---
 
-## 3. Modelo de Seguridad y Autenticación
+## 3. Matriz de Control de Acceso y Límites de Confianza (ACL)
 
-1. **Protección de Acceso Unificada**:
-   - Todo el servicio (HTML, APIs REST y WebSockets) requiere autenticación.
-   - El inicio de sesión genera una cookie de sesión cifrada por Flask:
-     - `SESSION_COOKIE_HTTPONLY = True` (inmune a lectura desde JavaScript).
-     - `SESSION_COOKIE_SAMESITE = "Lax"` (protección contra ataques CSRF).
-   - Los WebSockets validan la existencia de la sesión en el *handshake* inicial; cualquier conexión no autenticada es rechazada de inmediato.
-2. **Rotación Automática de Contraseña**:
-   - Si no se especifica una contraseña fija (`ENLACE_PASSWORD`), el servidor genera una clave aleatoria segura y opcionalmente la rota cada N horas (`ENLACE_PASSWORD_ROTAR_HORAS`).
-3. **Credenciales Sanitizadas**:
-   - Las claves de acceso de S3 y contraseñas SMTP residen únicamente en variables de entorno o memoria del servidor; ninguna API devuelve estas credenciales al navegador.
+El enrutamiento de presencia, ofertas de transferencia, portapapeles y mensajes se rige por la siguiente matriz:
+
+| Relación entre Dispositivos | Descubrimiento en Lista | Oferta de Transferencia Directa | Sincronización de Portapapeles | Buzón Privado |
+| :--- | :--- | :--- | :--- | :--- |
+| **Dispositivos Propios** (mismo `user_id`) | **Instantáneo** | Permitido (auto-aceptación opcional) | **Automática Bidireccional** | Envío Directo |
+| **Amigos Aceptados** (`status == ACCEPTED`) | **Visible** | Requiere consentimiento interactivo | Envío explícito | Envío Directo |
+| **Solicitud Pendiente** (`PENDING`) | **Oculto** | **Bloqueado (403)** | **Bloqueado** | Bloqueado |
+| **Bloqueado / No Conectado** (`BLOCKED`) | **Oculto** | **Bloqueado (403)** | **Bloqueado** | Bloqueado |
+
+---
+
+## 4. Particionamiento de Salas WebSocket (Socket.IO)
+
+Para garantizar aislamiento sin sobrecargar la base de datos con consultas por cada fragmento (*chunk*):
+
+1. **Sala de Usuario (`user_{user_id}`)**:
+   - Se une automáticamente al autenticarse.
+   - Recibe notificaciones de cuenta (nuevas solicitudes de amistad, eventos de seguridad, alertas).
+2. **Sala de Dispositivo (`dev_{device_id}`)**:
+   - Se une cuando el dispositivo físico conecta su socket.
+   - Canal punto a punto directo para eventos de transferencia: `send_offer`, `file_response`, `file_chunk`, `chunk_ack`.
+3. **Registro de Presencia Híbrido (`PresenceService`)**:
+   - Las conexiones activas residen en memoria RAM (`_device_to_sid`) para conmutación sub-milisegundo.
+   - Los latidos periódicos (*heartbeats*) actualizan `last_seen_at` en PostgreSQL de manera asíncrona y espaciada (máximo una vez cada 60s por dispositivo).
+
+---
+
+## 5. Canales de Transferencia y Aislamiento Multi-Inquilino
+
+### Canal 1: Streaming Binario en Vivo (P2P sobre WebSockets)
+- Diseñado para transferencias inmediatas entre pantallas activas.
+- El servidor actúa como conmutador de memoria RAM en tiempo real sin escribir en disco.
+- **Validación ACL**: El servidor verifica la relación de amistad antes de admitir cualquier evento `send_offer`.
+
+### Canal 2: Buzón de Servidor Asíncrono (`buzon/` con TTL)
+- Almacenamiento temporal para descarga posterior.
+- **Aislamiento en Disco**: Cada archivo se almacena bajo `buzon/{recipient_user_id}/{item_id}__{sanitized_filename}`.
+- **Control de Acceso**: La API solo expone archivos donde `recipient_user_id == current_user.id` o `sender_user_id == current_user.id`.
+- **Limpieza Automática**: Un hilo daemon en segundo plano (`MailboxService.start_cleanup_loop`) purga los registros expirados y elimina los archivos físicos en disco.
+
+### Canal 3: Almacenamiento en la Nube S3 Multi-Inquilino
+- Almacenamiento definitivo compatible con AWS S3, Cloudflare R2 y MinIO.
+- **Prefijo Aislado por Usuario**:
+  ```
+  users/{user_id}/devices/{device_id}/{uuid}_{filename}
+  ```
+- Todas las URLs prefirmadas de descarga y subida se validan criptográficamente garantizando que ningún usuario acceda a objetos fuera de su prefijo.
