@@ -36,6 +36,7 @@ def enforce_auth():
         "/manifest.json",
         "/service-worker.js",
         "/favicon.ico",
+        "/api/info",
     )
     if path in open_exact:
         return None
@@ -46,6 +47,7 @@ def enforce_auth():
         "/api/auth/",
         "/s3/share/",
         "/api/s3/share/",
+        "/api/info",
     )
     if any(path.startswith(prefix) for prefix in open_prefixes):
         return None
@@ -59,22 +61,78 @@ def enforce_auth():
     return None
 
 
+def get_or_create_default_user():
+    """Resolve or initialize default account for password-based or single-user access."""
+    import uuid
+    from app.models import User
+    from app.extensions import db
+    from sqlalchemy import select
+
+    user = db.session.scalar(select(User).where(User.username == "admin"))
+    if not user:
+        user = db.session.scalar(select(User).order_by(User.created_at.asc()))
+    if not user:
+        user = User(
+            username="admin",
+            email="admin@homelab.internal",
+            display_name="Administrador",
+            is_active=True,
+            is_admin=True,
+        )
+        user.set_password("admin123")
+        db.session.add(user)
+        db.session.commit()
+    return user
+
+
 @web_bp.route("/login", methods=["GET", "POST"])
 def login_page():
     """Render modern multi-user login portal or process legacy password fallback."""
     if request.method == "POST":
-        # Legacy form submission fallback
+        import uuid
+        from datetime import datetime, timezone
+        from app.models import Device, DeviceType
+        from app.extensions import db
+        from sqlalchemy import select
+
         password = request.form.get("password", "")
         next_path = request.form.get("next") or "/"
         configured_password = current_app.config.get("ENLACE_PASSWORD", "")
 
-        if configured_password and password == configured_password:
+        is_valid_legacy = (configured_password and password == configured_password) or (not configured_password and not password)
+
+        if is_valid_legacy:
+            default_user = get_or_create_default_user()
+            user_agent = request.headers.get("User-Agent", "").lower()
+            is_mobile = any(m in user_agent for m in ["android", "iphone", "ipad", "mobile"])
+            dev_type = DeviceType.MOBILE if is_mobile else DeviceType.PC
+            dev_name = "Móvil Principal" if is_mobile else "PC Principal"
+
+            # Auto-enroll device for this legacy session
+            device = db.session.scalar(
+                select(Device).where(
+                    Device.user_id == default_user.id,
+                    Device.device_name == dev_name,
+                    Device.is_active == True,
+                )
+            )
+            if not device:
+                device = Device(
+                    user_id=default_user.id,
+                    device_name=dev_name,
+                    device_type=dev_type,
+                    device_fingerprint=str(uuid.uuid4()),
+                    last_seen_at=datetime.now(timezone.utc),
+                    is_active=True,
+                )
+                db.session.add(device)
+                db.session.commit()
+
+            session.clear()
             session["logged_in"] = True
-            session.permanent = True
-            return redirect(next_path)
-        elif not configured_password:
-            # If no password configured, permit local access
-            session["logged_in"] = True
+            session["user_id"] = str(default_user.id)
+            session["device_id"] = str(device.id)
+            session["username"] = default_user.username
             session.permanent = True
             return redirect(next_path)
 
@@ -94,27 +152,73 @@ def logout():
 
 
 def get_current_user_and_device():
-    """Retrieve currently authenticated user and active device from session."""
-    user_id = session.get("user_id")
-    device_id = session.get("device_id")
-    from app.models import User, Device, to_uuid
+    """Retrieve currently authenticated user and active device from session with automatic fallback."""
+    import uuid
+    from datetime import datetime, timezone
+    from app.models import User, Device, DeviceType, to_uuid
     from app.extensions import db
     from sqlalchemy import select
+
+    user_id = session.get("user_id")
+    device_id = session.get("device_id")
+
+    if not user_id and session.get("logged_in"):
+        default_user = get_or_create_default_user()
+        user_id = str(default_user.id)
+        session["user_id"] = user_id
+
     user = None
     device = None
     if user_id:
         user = db.session.scalar(select(User).where(User.id == to_uuid(user_id), User.is_active == True))
+
     if user and device_id:
         device = db.session.scalar(
             select(Device).where(Device.id == to_uuid(device_id), Device.user_id == user.id, Device.is_active == True)
         )
+
     if user and not device:
+        # Fallback to most recently seen active device
         device = db.session.scalar(
             select(Device).where(Device.user_id == user.id, Device.is_active == True).order_by(Device.last_seen_at.desc())
         )
+        # If user has no devices at all, create an initial one
+        if not device:
+            user_agent = request.headers.get("User-Agent", "").lower()
+            is_mobile = any(m in user_agent for m in ["android", "iphone", "ipad", "mobile"])
+            dev_type = DeviceType.MOBILE if is_mobile else DeviceType.PC
+            dev_name = "Móvil" if is_mobile else "PC Principal"
+            device = Device(
+                user_id=user.id,
+                device_name=dev_name,
+                device_type=dev_type,
+                device_fingerprint=str(uuid.uuid4()),
+                last_seen_at=datetime.now(timezone.utc),
+                is_active=True,
+            )
+            db.session.add(device)
+            db.session.commit()
+
         if device:
             session["device_id"] = str(device.id)
+
     return user, device
+
+
+@web_bp.route("/api/info")
+def server_info():
+    """Expose server connection details for pairing and QR code generation."""
+    import os
+    port = current_app.config.get("PORT", 41823)
+    pub_url = os.environ.get("ENLACE_PUBLIC_URL", "").strip()
+    local_ip = os.environ.get("ENLACE_HOST_IP", "").strip() or "127.0.0.1"
+    return jsonify({
+        "ok": True,
+        "port": port,
+        "local_ip": local_ip,
+        "public_url": pub_url or f"http://{local_ip}:{port}",
+        "version": "2.0.0",
+    })
 
 
 @web_bp.route("/")

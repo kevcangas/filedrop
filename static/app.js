@@ -86,18 +86,43 @@
   function updateTargetHint() {
     const hint = document.getElementById("active-target-hint");
     if (!hint) return;
+    const visibleDevs = devices.filter((d) => d.device_id !== myDeviceId);
+    const onlineDevs = visibleDevs.filter((d) => d.is_online);
+
     if (selectedDeviceId === GLOBAL_TARGET_ID) {
-      hint.textContent = `Destino: 🌐 Global (${devices.length} conectado${devices.length === 1 ? "" : "s"})`;
+      hint.textContent = `Destino: 🌐 Global (${onlineDevs.length} en línea)`;
       hint.className = "active-target-badge global";
     } else {
-      const target = devices.find((d) => d.device_id === selectedDeviceId);
+      const target = visibleDevs.find((d) => d.device_id === selectedDeviceId);
       if (target) {
-        hint.textContent = `Destino: ${getDeviceIcon(target.device_type)} ${target.device_name}`;
-        hint.className = "active-target-badge specific";
+        if (target.is_online) {
+          hint.textContent = `Destino: ${getDeviceIcon(target.device_type)} ${target.device_name}`;
+          hint.className = "active-target-badge specific";
+        } else {
+          hint.textContent = `Destino (Buzón): ${getDeviceIcon(target.device_type)} ${target.device_name} (desconectado)`;
+          hint.className = "active-target-badge none";
+        }
       } else {
         hint.textContent = "Destino: Ninguno seleccionado";
         hint.className = "active-target-badge none";
       }
+    }
+  }
+
+  function formatRelativeTime(isoString) {
+    if (!isoString) return "";
+    try {
+      const diffMs = Date.now() - new Date(isoString).getTime();
+      const diffSec = Math.floor(diffMs / 1000);
+      if (diffSec < 60) return "hace un momento";
+      const diffMin = Math.floor(diffSec / 60);
+      if (diffMin < 60) return `hace ${diffMin} min`;
+      const diffHours = Math.floor(diffMin / 60);
+      if (diffHours < 24) return `hace ${diffHours} h`;
+      const diffDays = Math.floor(diffHours / 24);
+      return `hace ${diffDays} d`;
+    } catch {
+      return "";
     }
   }
 
@@ -106,17 +131,28 @@
     if (!list) return;
     list.innerHTML = "";
 
-    if (devices.length === 0) {
-      list.innerHTML = '<p class="empty-hint">Ningún otro dispositivo en línea todavía.</p>';
+    const visibleDevs = devices.filter((d) => d.device_id !== myDeviceId);
+
+    if (visibleDevs.length === 0) {
+      list.innerHTML = `
+        <div class="empty-hint" style="text-align:center; padding:18px 10px;">
+          <p style="margin:0 0 8px; font-weight:600; color:var(--text-secondary);">Ningún otro dispositivo vinculado aún.</p>
+          <p style="margin:0; font-size:12px; color:var(--text-muted); line-height:1.5;">
+            Inicia sesión en tu celular u otra PC con tu cuenta para que aparezcan aquí automáticamente.
+          </p>
+        </div>
+      `;
       selectedDeviceId = GLOBAL_TARGET_ID;
       updateTargetHint();
       return;
     }
 
     // Asegurar selección válida
-    if (selectedDeviceId !== GLOBAL_TARGET_ID && !devices.find((d) => d.device_id === selectedDeviceId)) {
+    if (selectedDeviceId !== GLOBAL_TARGET_ID && !visibleDevs.find((d) => d.device_id === selectedDeviceId)) {
       selectedDeviceId = GLOBAL_TARGET_ID;
     }
+
+    const onlineDevs = visibleDevs.filter((d) => d.is_online);
 
     // Fila 1: Opción Global (enviar a todos)
     const globalRow = document.createElement("div");
@@ -124,10 +160,12 @@
     globalRow.setAttribute("role", "button");
     globalRow.setAttribute("tabindex", "0");
     globalRow.innerHTML = `
-      <span class="pulse live"></span>
-      <div>
+      <span class="pulse ${onlineDevs.length > 0 ? "live" : ""}"></span>
+      <div style="flex:1;">
         <div class="device-name">🌐 Global — todos los conectados</div>
-        <div class="device-meta">Envía a los ${devices.length} dispositivo${devices.length === 1 ? "" : "s"} activos a la vez</div>
+        <div class="device-meta">
+          ${onlineDevs.length > 0 ? `Envía a los ${onlineDevs.length} dispositivo${onlineDevs.length === 1 ? "" : "s"} activos a la vez` : "Sin otros dispositivos activos en línea ahora"}
+        </div>
       </div>
     `;
     globalRow.onclick = () => {
@@ -136,25 +174,34 @@
     };
     list.appendChild(globalRow);
 
-    // Filas individuales por dispositivo par
-    devices.forEach((d) => {
+    // Filas individuales por dispositivo par (en línea primero)
+    const sortedDevs = [...visibleDevs].sort((a, b) => (b.is_online ? 1 : 0) - (a.is_online ? 1 : 0));
+
+    sortedDevs.forEach((d) => {
       const isSelected = d.device_id === selectedDeviceId;
       const row = document.createElement("div");
-      row.className = "device-row" + (isSelected ? " selected" : "");
+      row.className = "device-row" + (isSelected ? " selected" : "") + (d.is_online ? "" : " device-offline");
       row.setAttribute("role", "button");
       row.setAttribute("tabindex", "0");
 
       const badgeLabel = d.is_own_account ? "Esta cuenta" : `@${d.owner_username}`;
       const badgeClass = d.is_own_account ? "badge-own" : "badge-friend";
+      const statusText = d.is_online
+        ? "🟢 En línea"
+        : `⚪ Desconectado ${d.last_seen_at ? "· " + formatRelativeTime(d.last_seen_at) : ""}`;
 
       row.innerHTML = `
-        <span class="pulse live"></span>
+        <span class="pulse ${d.is_online ? "live" : ""}"></span>
         <div style="flex:1;">
           <div class="spread" style="align-items:center;">
-            <span class="device-name">${getDeviceIcon(d.device_type)} ${escapeHtml(d.device_name)}</span>
+            <span class="device-name" style="${d.is_online ? "" : "opacity:0.8;"}">
+              ${getDeviceIcon(d.device_type)} ${escapeHtml(d.device_name)}
+            </span>
             <span class="device-account-badge ${badgeClass}">${escapeHtml(badgeLabel)}</span>
           </div>
-          <div class="device-meta">en línea · ${d.device_id.slice(0, 8)}</div>
+          <div class="device-meta" style="margin-top:2px;">
+            ${statusText} ${!d.is_online ? "· entrega diferida por Buzón" : ""}
+          </div>
         </div>
       `;
       row.onclick = () => {
@@ -167,6 +214,24 @@
     updateTargetHint();
   }
 
+  // --- Sincronización REST y Presencia de Dispositivos -------------------------
+  async function fetchVisibleDevices() {
+    try {
+      const res = await fetch("/api/devices/visible");
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data && data.ok && Array.isArray(data.devices)) {
+        if (data.current_device_id && !myDeviceId) {
+          myDeviceId = data.current_device_id;
+        }
+        devices = data.devices;
+        renderDevices();
+      }
+    } catch (err) {
+      console.warn("Could not fetch visible devices via REST", err);
+    }
+  }
+
   // --- Handlers de Socket.IO y Presencia ----------------------------------------
   function setupSocketListeners() {
     socket.on("connect", () => {
@@ -175,12 +240,12 @@
         ind.className = "status-indicator online";
         ind.innerHTML = '<span class="pulse live"></span> En línea';
       }
-      // Emitir registro con el ID canónico
       socket.emit("register_device", {
         device_id: myDeviceId,
         device_name: myDeviceName,
         device_type: (window.__FILEDROP_DEVICE__ && window.__FILEDROP_DEVICE__.device_type) || "pc",
       });
+      fetchVisibleDevices();
     });
 
     socket.on("disconnect", () => {
@@ -199,6 +264,7 @@
           window.__FILEDROP_DEVICE__.id = data.device_id;
         }
       }
+      fetchVisibleDevices();
     });
 
     // Actualización de lista de dispositivos disponibles
@@ -209,14 +275,13 @@
       } else if (data && Array.isArray(data.devices)) {
         rawList = data.devices;
       }
-      // Filtrar el dispositivo actual para mostrar únicamente pares
-      devices = rawList.filter((d) => d.device_id !== myDeviceId && d.is_online);
+      devices = rawList;
       renderDevices();
     });
 
     socket.on("device_list", (data) => {
       if (Array.isArray(data)) {
-        devices = data.filter((d) => d.device_id !== myDeviceId && d.is_online);
+        devices = data;
         renderDevices();
       }
     });
@@ -244,6 +309,43 @@
       if (fromEl) fromEl.textContent = `De: ${data.sender_name || "Otro dispositivo"}`;
       toast("📋 Portapapeles sincronizado");
     });
+  }
+
+  // Enlazar listeners de socket inmediatamente al cargar el script
+  setupSocketListeners();
+  if (socket.connected) {
+    socket.emit("register_device", {
+      device_id: myDeviceId,
+      device_name: myDeviceName,
+      device_type: (window.__FILEDROP_DEVICE__ && window.__FILEDROP_DEVICE__.device_type) || "pc",
+    });
+    fetchVisibleDevices();
+  }
+
+  function setupVisibilityListeners() {
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") {
+        if (!socket.connected) {
+          socket.connect();
+        } else {
+          socket.emit("register_device", {
+            device_id: myDeviceId,
+            device_name: myDeviceName,
+          });
+        }
+        fetchVisibleDevices();
+      }
+    });
+
+    window.addEventListener("focus", () => fetchVisibleDevices());
+    window.addEventListener("pageshow", () => fetchVisibleDevices());
+
+    // Actualización de presencia periódica en segundo plano
+    setInterval(() => {
+      if (document.visibilityState === "visible") {
+        fetchVisibleDevices();
+      }
+    }, 10000);
   }
 
   // --- Ofertas Entrantes y Modal de Aceptación ---------------------------------
@@ -642,7 +744,7 @@
   // --- Inicialización al Cargar el DOM -----------------------------------------
   document.addEventListener("DOMContentLoaded", () => {
     setupTabs();
-    setupSocketListeners();
+    setupVisibilityListeners();
     setupDropzone();
     setupClipboard();
     setupOfferModal();
@@ -650,11 +752,39 @@
     setupDeviceSettings();
     setupS3DirectUpload();
 
+    // Resolver ID de dispositivo canónico si la sesión no lo tenía en template
+    if (!myDeviceId) {
+      fetch("/api/devices/me")
+        .then((r) => r.json())
+        .then((d) => {
+          if (d.ok && d.device) {
+            myDeviceId = d.device.id;
+            myDeviceName = d.device.device_name;
+            fetchVisibleDevices();
+          }
+        })
+        .catch(() => {});
+    } else {
+      fetchVisibleDevices();
+    }
+
     const btnRefreshDevs = document.getElementById("btn-refresh-devices");
     if (btnRefreshDevs) {
-      btnRefreshDevs.onclick = () => {
-        socket.emit("register_device", { device_id: myDeviceId, device_name: myDeviceName });
-        toast("Refrescando lista de dispositivos...");
+      btnRefreshDevs.onclick = async () => {
+        btnRefreshDevs.style.transform = "rotate(360deg)";
+        btnRefreshDevs.style.transition = "transform 0.5s cubic-bezier(0.16, 1, 0.3, 1)";
+        setTimeout(() => {
+          btnRefreshDevs.style.transform = "none";
+          btnRefreshDevs.style.transition = "none";
+        }, 500);
+
+        if (!socket.connected) {
+          socket.connect();
+        } else {
+          socket.emit("register_device", { device_id: myDeviceId, device_name: myDeviceName });
+        }
+        await fetchVisibleDevices();
+        toast("Lista de dispositivos actualizada.");
       };
     }
 

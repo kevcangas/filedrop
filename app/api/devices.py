@@ -79,6 +79,22 @@ def list_devices():
     }), 200
 
 
+@devices_bp.route("/visible", methods=["GET"])
+def get_visible_devices():
+    """Retrieve all devices visible to current authenticated user (own + friends) with presence status."""
+    current_user = require_user()
+    if not current_user:
+        return jsonify({"ok": False, "error": "Authentication required."}), 401
+
+    from app.services import presence_service
+    visible = presence_service.get_visible_devices_for_user(get_db(), current_user.id)
+    return jsonify({
+        "ok": True,
+        "current_device_id": session.get("device_id"),
+        "devices": visible,
+    }), 200
+
+
 @devices_bp.route("/<device_id>/rename", methods=["PATCH", "POST"])
 def rename_device(device_id):
     """Update display name for a specific owned device."""

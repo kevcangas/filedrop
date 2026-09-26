@@ -123,6 +123,7 @@ class PresenceService:
                     "is_own_account": device.user_id == current_user_id,
                     "is_self": False,  # Deprecated: clients filter by device_id !== my_device_id
                     "is_online": is_online,
+                    "last_seen_at": device.last_seen_at.isoformat() if device.last_seen_at else None,
                 })
 
         return visible_list

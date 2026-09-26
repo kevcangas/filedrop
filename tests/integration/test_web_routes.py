@@ -41,3 +41,14 @@ def test_authenticated_root_view(client, sample_user):
     assert res.status_code == 200
     assert b"FILEDROP" in res.data
     assert b"tab-content-transfer" in res.data
+
+
+def test_api_info_route(client):
+    """Test /api/info returns public connection configuration."""
+    res = client.get("/api/info")
+    assert res.status_code == 200
+    data = res.get_json()
+    assert data["ok"] is True
+    assert "public_url" in data
+    assert "port" in data
+

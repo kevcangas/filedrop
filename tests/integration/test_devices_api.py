@@ -62,3 +62,22 @@ def test_revoke_device(client, sample_user, db_session):
     target = next((d for d in devices if d["id"] == str(second_device.id)), None)
     assert target is not None
     assert target["is_active"] is False
+
+
+def test_get_visible_devices(client, sample_user):
+    """Test retrieving all visible devices for current authenticated user with presence state."""
+    login_as(client, sample_user.username, "SecurePassword123")
+
+    res = client.get("/api/devices/visible")
+    assert res.status_code == 200
+    data = res.get_json()
+    assert data["ok"] is True
+    assert isinstance(data["devices"], list)
+    assert len(data["devices"]) >= 1
+    first = data["devices"][0]
+    assert "device_id" in first
+    assert "device_name" in first
+    assert "is_online" in first
+    assert "is_own_account" in first
+    assert first["is_own_account"] is True
+

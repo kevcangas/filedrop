@@ -16,6 +16,12 @@ def verify_socket_session(db_session) -> Tuple[Optional[User], Optional[Device]]
     user_id = session.get("user_id")
     device_id = session.get("device_id")
 
+    if not user_id and session.get("logged_in"):
+        from app.views.web import get_or_create_default_user
+        default_user = get_or_create_default_user()
+        user_id = str(default_user.id)
+        session["user_id"] = user_id
+
     user_uuid = to_uuid(user_id)
     if not user_uuid:
         return None, None
