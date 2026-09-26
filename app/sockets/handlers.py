@@ -73,19 +73,24 @@ def register_socket_handlers(sio):
         dev_name = (data.get("device_name") or "").strip()
         dev_type_str = (data.get("device_type") or "").strip().lower()
 
-        # 1. Match by explicit device UUID if valid and belongs to user
+        # 1. Match by hardware fingerprint (highest priority: unique per client browser instance)
         matched_device = None
-        dev_uuid = to_uuid(dev_id_str)
-        if dev_uuid:
-            matched_device = db.session.scalar(
-                select(Device).where(Device.id == dev_uuid, Device.user_id == user.id, Device.is_active == True)
-            )
-
-        # 2. Match by hardware fingerprint
-        if not matched_device and dev_fp_str:
+        if dev_fp_str:
             matched_device = db.session.scalar(
                 select(Device).where(Device.device_fingerprint == dev_fp_str, Device.user_id == user.id, Device.is_active == True)
             )
+
+        # 2. Match by explicit device UUID if compatible with client form factor
+        dev_uuid = to_uuid(dev_id_str)
+        if not matched_device and dev_uuid:
+            cand = db.session.scalar(
+                select(Device).where(Device.id == dev_uuid, Device.user_id == user.id, Device.is_active == True)
+            )
+            if cand:
+                is_cand_mobile = cand.device_type == DeviceType.MOBILE or any(k in cand.device_name.lower() for k in ["cel", "movil", "phone"])
+                client_is_mobile = dev_type_str == "mobile" or any(k in dev_name.lower() for k in ["cel", "movil", "phone"])
+                if client_is_mobile == is_cand_mobile:
+                    matched_device = cand
 
         # 3. Match by device name
         if not matched_device and dev_name:
@@ -93,7 +98,7 @@ def register_socket_handlers(sio):
                 select(Device).where(Device.device_name == dev_name, Device.user_id == user.id, Device.is_active == True)
             )
 
-        # 4. Use device from session if already verified
+        # 4. Use device from session if already verified and compatible
         if not matched_device and device:
             matched_device = device
 

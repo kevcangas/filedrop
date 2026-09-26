@@ -20,20 +20,29 @@
   }
 
   function getDetectedDeviceType() {
-    if (window.__FILEDROP_DEVICE__ && window.__FILEDROP_DEVICE__.device_type) {
-      return window.__FILEDROP_DEVICE__.device_type;
-    }
     return /android|iphone|ipad|mobile/i.test(navigator.userAgent) ? "mobile" : "pc";
   }
 
-  let serverDeviceId = (window.__FILEDROP_DEVICE__ && window.__FILEDROP_DEVICE__.id) || "";
-  let storedDeviceId = localStorage.getItem("enlace_device_id") || "";
-  let myDeviceId = serverDeviceId || storedDeviceId || "";
-  if (serverDeviceId) {
+  const isMobileClient = /android|iphone|ipad|mobile/i.test(navigator.userAgent);
+  let serverDevice = window.__FILEDROP_DEVICE__ || {};
+  let serverDeviceId = serverDevice.id || "";
+  let serverDeviceType = (serverDevice.device_type || "").toLowerCase();
+
+  let myDeviceId = "";
+  if (serverDeviceId && ((isMobileClient && (serverDeviceType === "mobile" || serverDevice.device_name.toLowerCase().includes("cel"))) || (!isMobileClient && (serverDeviceType === "pc" || serverDevice.device_name.toLowerCase().includes("pc"))))) {
+    myDeviceId = serverDeviceId;
     localStorage.setItem("enlace_device_id", serverDeviceId);
+    localStorage.setItem("enlace_device_type", isMobileClient ? "mobile" : "pc");
+  } else {
+    let storedId = localStorage.getItem("enlace_device_id") || "";
+    let storedType = localStorage.getItem("enlace_device_type") || "";
+    if (storedId && ((isMobileClient && storedType === "mobile") || (!isMobileClient && storedType === "pc"))) {
+      myDeviceId = storedId;
+    }
   }
+
   let myUserId = (window.__FILEDROP_USER__ && window.__FILEDROP_USER__.id) || "";
-  let myDeviceName = (window.__FILEDROP_DEVICE__ && window.__FILEDROP_DEVICE__.device_name) || localStorage.getItem("enlace_device_name") || "Dispositivo";
+  let myDeviceName = (window.__FILEDROP_DEVICE__ && window.__FILEDROP_DEVICE__.device_name) || localStorage.getItem("enlace_device_name") || (isMobileClient ? "Celular" : "PC");
 
   let selectedDeviceId = GLOBAL_TARGET_ID;
   let devices = [];
@@ -42,7 +51,13 @@
   // --- Inicialización del Socket -----------------------------------------------
   const socket = io({
     withCredentials: true,
-    transports: ["websocket", "polling"],
+    transports: ["polling", "websocket"],
+    reconnection: true,
+    reconnectionDelay: 1000,
+  });
+
+  socket.on("connect_error", (err) => {
+    console.warn("Socket connection error:", err);
   });
 
   // --- Utilidades UI -----------------------------------------------------------
@@ -283,6 +298,7 @@
       if (data && data.device_id) {
         myDeviceId = data.device_id;
         localStorage.setItem("enlace_device_id", data.device_id);
+        if (data.device_type) localStorage.setItem("enlace_device_type", data.device_type);
         if (data.user_id) myUserId = data.user_id;
         if (data.device_name) {
           myDeviceName = data.device_name;
