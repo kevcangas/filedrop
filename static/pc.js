@@ -153,6 +153,20 @@ socket.on("device_list", (list) => {
   renderDevices();
 });
 
+socket.on("devices_updated", (data) => {
+  if (data && Array.isArray(data.devices)) {
+    const myDevId = localStorage.getItem(DEVICE_ID_KEY);
+    devices = data.devices.filter((d) => d.is_online && d.device_id !== myDevId);
+    renderDevices();
+  }
+});
+
+socket.on("session_ready", (data) => {
+  if (data && data.device_id) {
+    localStorage.setItem(DEVICE_ID_KEY, data.device_id);
+  }
+});
+
 socket.on("notice", (data) => toast(data.text));
 
 socket.on("disconnect", () => {

@@ -25,6 +25,11 @@ def verify_socket_session(db_session) -> Tuple[Optional[User], Optional[Device]]
         device = db_session.scalar(
             select(Device).where(Device.id == device_id, Device.user_id == user.id, Device.is_active == True)
         )
+    if user and not device:
+        # Fallback to the user's most recently active enrolled device
+        device = db_session.scalar(
+            select(Device).where(Device.user_id == user.id, Device.is_active == True).order_by(Device.last_seen_at.desc())
+        )
     return user, device
 
 

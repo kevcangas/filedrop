@@ -154,8 +154,14 @@ function connectTo(address, alias) {
   currentAddress = address;
 
   const defaultScheme = window.location.protocol === "https:" ? "https://" : "http://";
+  const isCurrentHost = !address || address === window.location.host || address === window.location.hostname;
   const url = address.includes("://") ? address : defaultScheme + address;
-  socket = io(url, { transports: ["websocket", "polling"], reconnectionAttempts: 20 });
+  const opts = {
+    transports: ["websocket", "polling"],
+    reconnectionAttempts: 20,
+    withCredentials: true,
+  };
+  socket = isCurrentHost ? io(opts) : io(url, opts);
 
   const pulse = document.getElementById("conn-pulse");
   if (pulse) pulse.className = "pulse searching";
@@ -592,6 +598,20 @@ function wireSocketEvents() {
     renderDevices();
   });
 
+  socket.on("devices_updated", (data) => {
+    if (data && Array.isArray(data.devices)) {
+      const myDevId = localStorage.getItem(DEVICE_ID_KEY);
+      devices = data.devices.filter((d) => d.is_online && d.device_id !== myDevId);
+      renderDevices();
+    }
+  });
+
+  socket.on("session_ready", (data) => {
+    if (data && data.device_id) {
+      localStorage.setItem(DEVICE_ID_KEY, data.device_id);
+    }
+  });
+
   socket.on("notice", (data) => toast(data.text));
 
   socket.on("file_response_relay", (data) => {
@@ -804,8 +824,8 @@ if (typeof setupS3ExplorerEvents === "function") {
   });
 }
 
-// Cargar pestaña inicial (S3 por defecto para acceso directo)
-const savedMobileTab = localStorage.getItem("enlace_mobile_tab") || "s3";
+// Cargar pestaña inicial (Transferir por defecto)
+const savedMobileTab = localStorage.getItem("enlace_mobile_tab") || "transfer";
 setMobileTab(savedMobileTab);
 
 // Auto-conectar de inmediato a la anfitriona
