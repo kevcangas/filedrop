@@ -52,3 +52,41 @@ def test_multi_device_presence_and_discovery(app, db_session):
             assert len(dev1_list_events) >= 1
             visible_to_dev1 = dev1_list_events[0]["args"][0]
             assert any(d["device_id"] == str(dev2.id) and d["is_online"] for d in visible_to_dev1)
+
+
+def test_dynamic_registration_with_fingerprint_and_device_id(app, db_session):
+    """Test device connecting without device_id in session can dynamically register using fingerprint or device_id."""
+    user = User(username="dyn_user", email="dyn@test.com")
+    user.set_password("SecurePass123!")
+    db_session.add(user)
+    db_session.commit()
+
+    phone = Device(user_id=user.id, device_name="Cel Kev Test", device_type=DeviceType.MOBILE, device_fingerprint="fp_cel_kev")
+    pc = Device(user_id=user.id, device_name="PC Kev Test", device_type=DeviceType.PC, device_fingerprint="fp_pc_kev")
+    db_session.add_all([phone, pc])
+    db_session.commit()
+
+    # Mobile connects with only user_id in session, but sends device_fingerprint in register_device
+    with app.test_client() as flask_client:
+        with flask_client.session_transaction() as sess:
+            sess["user_id"] = str(user.id)
+            # deliberately omitted device_id
+
+        sio = socketio.test_client(app, flask_test_client=flask_client)
+        assert sio.is_connected()
+
+        # Emit explicit registration with fingerprint and device_id
+        sio.emit("register_device", {
+            "device_id": str(phone.id),
+            "device_fingerprint": "fp_cel_kev",
+            "device_name": "Cel Kev Test",
+            "device_type": "mobile",
+        })
+
+        received = sio.get_received()
+        ready_events = [e for e in received if e["name"] == "session_ready"]
+        assert len(ready_events) >= 1
+        ready_data = ready_events[-1]["args"][0]
+        assert ready_data["ok"] is True
+        assert ready_data["device_id"] == str(phone.id)
+        assert ready_data["device_type"] == "mobile"

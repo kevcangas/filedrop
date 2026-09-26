@@ -37,11 +37,12 @@ def verify_socket_session(db_session) -> Tuple[Optional[User], Optional[Device]]
             select(Device).where(Device.id == dev_uuid, Device.user_id == user.id, Device.is_active == True)
         )
     if not device:
-        # Fallback to the user's most recently active enrolled device
-        device = db_session.scalar(
-            select(Device).where(Device.user_id == user.id, Device.is_active == True).order_by(Device.last_seen_at.desc())
-        )
-        if device:
+        # Only fall back if the user has exactly 1 enrolled device to prevent identity hijacking
+        all_devs = db_session.scalars(
+            select(Device).where(Device.user_id == user.id, Device.is_active == True)
+        ).all()
+        if len(all_devs) == 1:
+            device = all_devs[0]
             session["device_id"] = str(device.id)
 
     return user, device

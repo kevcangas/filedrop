@@ -47,6 +47,7 @@ def enforce_auth():
         "/api/auth/",
         "/s3/share/",
         "/api/s3/share/",
+        "/api/s3/status",
         "/api/info",
     )
     if any(path.startswith(prefix) for prefix in open_prefixes):
@@ -178,26 +179,71 @@ def get_current_user_and_device():
         )
 
     if user and not device:
-        # Fallback to most recently seen active device
-        device = db.session.scalar(
-            select(Device).where(Device.user_id == user.id, Device.is_active == True).order_by(Device.last_seen_at.desc())
-        )
-        # If user has no devices at all, create an initial one
+        from sqlalchemy import or_
+        user_agent = request.headers.get("User-Agent", "").lower()
+        is_mobile = any(m in user_agent for m in ["android", "iphone", "ipad", "mobile"])
+
+        # Check client cookie or header for explicit device ID
+        candidate_dev_id = request.cookies.get("enlace_device_id") or request.headers.get("X-Device-Id")
+        if candidate_dev_id:
+            c_uuid = to_uuid(candidate_dev_id)
+            if c_uuid:
+                device = db.session.scalar(
+                    select(Device).where(Device.id == c_uuid, Device.user_id == user.id, Device.is_active == True)
+                )
+
+        # Match device by form factor
         if not device:
-            user_agent = request.headers.get("User-Agent", "").lower()
-            is_mobile = any(m in user_agent for m in ["android", "iphone", "ipad", "mobile"])
-            dev_type = DeviceType.MOBILE if is_mobile else DeviceType.PC
-            dev_name = "Móvil" if is_mobile else "PC Principal"
-            device = Device(
-                user_id=user.id,
-                device_name=dev_name,
-                device_type=dev_type,
-                device_fingerprint=str(uuid.uuid4()),
-                last_seen_at=datetime.now(timezone.utc),
-                is_active=True,
-            )
-            db.session.add(device)
-            db.session.commit()
+            if is_mobile:
+                device = db.session.scalar(
+                    select(Device).where(
+                        Device.user_id == user.id,
+                        Device.is_active == True,
+                        or_(
+                            Device.device_type == DeviceType.MOBILE,
+                            Device.device_name.ilike("%cel%"),
+                            Device.device_name.ilike("%movil%"),
+                            Device.device_name.ilike("%phone%"),
+                        ),
+                    ).order_by(Device.last_seen_at.desc())
+                )
+                if device and device.device_type != DeviceType.MOBILE:
+                    device.device_type = DeviceType.MOBILE
+                    db.session.commit()
+            else:
+                device = db.session.scalar(
+                    select(Device).where(
+                        Device.user_id == user.id,
+                        Device.is_active == True,
+                        or_(
+                            Device.device_type == DeviceType.PC,
+                            Device.device_name.ilike("%pc%"),
+                            Device.device_name.ilike("%laptop%"),
+                            Device.device_name.ilike("%escritorio%"),
+                        ),
+                    ).order_by(Device.last_seen_at.desc())
+                )
+
+        # Fallback to single enrolled device or most recent
+        if not device:
+            all_user_devs = db.session.scalars(
+                select(Device).where(Device.user_id == user.id, Device.is_active == True).order_by(Device.last_seen_at.desc())
+            ).all()
+            if all_user_devs:
+                device = all_user_devs[0]
+            else:
+                dev_type = DeviceType.MOBILE if is_mobile else DeviceType.PC
+                dev_name = "Celular" if is_mobile else "PC Principal"
+                device = Device(
+                    user_id=user.id,
+                    device_name=dev_name,
+                    device_type=dev_type,
+                    device_fingerprint=str(uuid.uuid4()),
+                    last_seen_at=datetime.now(timezone.utc),
+                    is_active=True,
+                )
+                db.session.add(device)
+                db.session.commit()
 
         if device:
             session["device_id"] = str(device.id)

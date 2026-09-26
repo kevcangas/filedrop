@@ -9,9 +9,31 @@
 
   // --- Estado y Configuración Global -------------------------------------------
   const GLOBAL_TARGET_ID = "todos";
-  let myDeviceId = (window.__FILEDROP_DEVICE__ && window.__FILEDROP_DEVICE__.id) || "";
+
+  function getDeviceFingerprint() {
+    let fp = localStorage.getItem("enlace_device_fingerprint");
+    if (!fp) {
+      fp = "fp_" + Math.random().toString(36).substring(2) + Date.now().toString(36);
+      localStorage.setItem("enlace_device_fingerprint", fp);
+    }
+    return fp;
+  }
+
+  function getDetectedDeviceType() {
+    if (window.__FILEDROP_DEVICE__ && window.__FILEDROP_DEVICE__.device_type) {
+      return window.__FILEDROP_DEVICE__.device_type;
+    }
+    return /android|iphone|ipad|mobile/i.test(navigator.userAgent) ? "mobile" : "pc";
+  }
+
+  let serverDeviceId = (window.__FILEDROP_DEVICE__ && window.__FILEDROP_DEVICE__.id) || "";
+  let storedDeviceId = localStorage.getItem("enlace_device_id") || "";
+  let myDeviceId = serverDeviceId || storedDeviceId || "";
+  if (serverDeviceId) {
+    localStorage.setItem("enlace_device_id", serverDeviceId);
+  }
   let myUserId = (window.__FILEDROP_USER__ && window.__FILEDROP_USER__.id) || "";
-  let myDeviceName = (window.__FILEDROP_DEVICE__ && window.__FILEDROP_DEVICE__.device_name) || "Dispositivo";
+  let myDeviceName = (window.__FILEDROP_DEVICE__ && window.__FILEDROP_DEVICE__.device_name) || localStorage.getItem("enlace_device_name") || "Dispositivo";
 
   let selectedDeviceId = GLOBAL_TARGET_ID;
   let devices = [];
@@ -243,7 +265,8 @@
       socket.emit("register_device", {
         device_id: myDeviceId,
         device_name: myDeviceName,
-        device_type: (window.__FILEDROP_DEVICE__ && window.__FILEDROP_DEVICE__.device_type) || "pc",
+        device_type: getDetectedDeviceType(),
+        device_fingerprint: getDeviceFingerprint(),
       });
       fetchVisibleDevices();
     });
@@ -259,10 +282,19 @@
     socket.on("session_ready", (data) => {
       if (data && data.device_id) {
         myDeviceId = data.device_id;
-        myUserId = data.user_id;
+        localStorage.setItem("enlace_device_id", data.device_id);
+        if (data.user_id) myUserId = data.user_id;
+        if (data.device_name) {
+          myDeviceName = data.device_name;
+          localStorage.setItem("enlace_device_name", data.device_name);
+        }
         if (window.__FILEDROP_DEVICE__) {
           window.__FILEDROP_DEVICE__.id = data.device_id;
+          if (data.device_name) window.__FILEDROP_DEVICE__.device_name = data.device_name;
+          if (data.device_type) window.__FILEDROP_DEVICE__.device_type = data.device_type;
         }
+        // Save cookie for standard HTTP requests
+        document.cookie = "enlace_device_id=" + encodeURIComponent(data.device_id) + "; path=/; max-age=31536000; SameSite=Lax";
       }
       fetchVisibleDevices();
     });
@@ -317,7 +349,8 @@
     socket.emit("register_device", {
       device_id: myDeviceId,
       device_name: myDeviceName,
-      device_type: (window.__FILEDROP_DEVICE__ && window.__FILEDROP_DEVICE__.device_type) || "pc",
+      device_type: getDetectedDeviceType(),
+      device_fingerprint: getDeviceFingerprint(),
     });
     fetchVisibleDevices();
   }
@@ -331,6 +364,8 @@
           socket.emit("register_device", {
             device_id: myDeviceId,
             device_name: myDeviceName,
+            device_type: getDetectedDeviceType(),
+            device_fingerprint: getDeviceFingerprint(),
           });
         }
         fetchVisibleDevices();
@@ -738,8 +773,14 @@
           const data = await res.json();
           if (res.ok && data.ok) {
             myDeviceName = newName;
+            localStorage.setItem("enlace_device_name", newName);
             toast("Nombre del dispositivo actualizado.");
-            socket.emit("register_device", { device_id: myDeviceId, device_name: newName });
+            socket.emit("register_device", {
+              device_id: myDeviceId,
+              device_name: newName,
+              device_type: getDetectedDeviceType(),
+              device_fingerprint: getDeviceFingerprint(),
+            });
           } else {
             toast(data.error || "Error al renombrar.", true);
           }

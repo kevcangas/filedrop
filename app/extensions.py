@@ -14,4 +14,4 @@ from app.models.base import Base
 db = SQLAlchemy(model_class=Base)
 migrate = Migrate()
 socketio = SocketIO(cors_allowed_origins="*", max_http_buffer_size=16 * 1024 * 1024)
-limiter = Limiter(key_func=get_remote_address, default_limits=["200 per day", "50 per hour"])
+limiter = Limiter(key_func=get_remote_address, default_limits=["10000 per hour", "500 per minute"])

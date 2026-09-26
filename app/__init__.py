@@ -36,6 +36,10 @@ def create_app(config_class=Config) -> Flask:
     socketio.init_app(app)
     limiter.init_app(app)
 
+    # Support reverse-proxy headers from Traefik
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+
     # Register API Blueprints
     app.register_blueprint(auth_bp)
     app.register_blueprint(friends_bp)

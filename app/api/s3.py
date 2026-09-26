@@ -4,6 +4,7 @@ S3 Storage REST API Blueprint for multi-tenant cloud storage operations.
 
 from flask import Blueprint, current_app, jsonify, redirect, request, session
 from app.services import S3Service
+from app.extensions import limiter
 
 s3_bp = Blueprint("s3_bp", __name__, url_prefix="/api/s3")
 
@@ -23,6 +24,7 @@ def get_effective_user_id() -> str:
 
 
 @s3_bp.route("/status", methods=["GET"])
+@limiter.exempt
 def s3_status():
     """Return S3 connection status and bucket availability."""
     svc = get_s3_service()
@@ -78,6 +80,7 @@ def s3_upload():
 
 
 @s3_bp.route("/files", methods=["GET"])
+@limiter.exempt
 def s3_files():
     """List S3 objects and folders stored under the authenticated user's prefix."""
     svc = get_s3_service()

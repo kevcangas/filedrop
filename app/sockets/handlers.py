@@ -49,7 +49,10 @@ def register_socket_handlers(sio):
 
     @sio.on("register_device")
     def handle_register_device(data):
-        """Dynamic device registration hook with UUID validation and session alignment."""
+        """Dynamic device registration hook with UUID validation, fingerprint matching, and session alignment."""
+        if not isinstance(data, dict):
+            data = {}
+
         user, device = verify_socket_session(db.session)
         sid = request.sid
 
@@ -60,33 +63,113 @@ def register_socket_handlers(sio):
             if user_uuid:
                 user = db.session.scalar(select(User).where(User.id == user_uuid, User.is_active == True))
 
-        if user and not device:
-            from app.models import to_uuid
-            dev_id_str = (data.get("device_id") or "").strip()
-            dev_uuid = to_uuid(dev_id_str)
-            if dev_uuid:
-                device = db.session.scalar(select(Device).where(Device.id == dev_uuid, Device.user_id == user.id, Device.is_active == True))
-            if not device:
-                # Fallback to the user's most recently active device
-                device = db.session.scalar(
-                    select(Device).where(Device.user_id == user.id, Device.is_active == True).order_by(Device.last_seen_at.desc())
-                )
-            if device:
-                session["device_id"] = str(device.id)
+        if not user:
+            emit("session_error", {"error": "Authentication required."})
+            return
 
-        if user and device:
-            device.mark_seen()
-            db.session.commit()
-            presence_service.register_socket(
-                sid=sid,
-                user_id=str(user.id),
-                device_id=str(device.id),
-                device_meta=data,
+        from app.models import DeviceType, to_uuid
+        dev_id_str = (data.get("device_id") or "").strip()
+        dev_fp_str = (data.get("device_fingerprint") or "").strip()
+        dev_name = (data.get("device_name") or "").strip()
+        dev_type_str = (data.get("device_type") or "").strip().lower()
+
+        # 1. Match by explicit device UUID if valid and belongs to user
+        matched_device = None
+        dev_uuid = to_uuid(dev_id_str)
+        if dev_uuid:
+            matched_device = db.session.scalar(
+                select(Device).where(Device.id == dev_uuid, Device.user_id == user.id, Device.is_active == True)
             )
-            join_room(f"user_{user.id}")
-            join_room(f"dev_{device.id}")
-            emit("session_ready", {"ok": True, "device_id": str(device.id), "user_id": str(user.id)})
-            _broadcast_device_updates(user.id)
+
+        # 2. Match by hardware fingerprint
+        if not matched_device and dev_fp_str:
+            matched_device = db.session.scalar(
+                select(Device).where(Device.device_fingerprint == dev_fp_str, Device.user_id == user.id, Device.is_active == True)
+            )
+
+        # 3. Match by device name
+        if not matched_device and dev_name:
+            matched_device = db.session.scalar(
+                select(Device).where(Device.device_name == dev_name, Device.user_id == user.id, Device.is_active == True)
+            )
+
+        # 4. Use device from session if already verified
+        if not matched_device and device:
+            matched_device = device
+
+        # 5. Fallback to single device if user only has 1
+        if not matched_device:
+            all_user_devs = db.session.scalars(
+                select(Device).where(Device.user_id == user.id, Device.is_active == True)
+            ).all()
+            if len(all_user_devs) == 1:
+                matched_device = all_user_devs[0]
+
+        # 6. Auto-enroll if still not matched
+        if not matched_device:
+            from datetime import datetime, timezone
+            try:
+                dtype = DeviceType(dev_type_str)
+            except ValueError:
+                dtype = DeviceType.MOBILE if any(k in dev_name.lower() for k in ["cel", "movil", "phone", "android", "iphone"]) else DeviceType.PC
+
+            matched_device = Device(
+                user_id=user.id,
+                device_name=dev_name or ("Celular" if dtype == DeviceType.MOBILE else "PC"),
+                device_type=dtype,
+                device_fingerprint=dev_fp_str or str(uuid.uuid4()),
+                last_seen_at=datetime.now(timezone.utc),
+                is_active=True,
+            )
+            db.session.add(matched_device)
+            db.session.flush()
+
+        device = matched_device
+        session["device_id"] = str(device.id)
+
+        # Sync device metadata
+        if dev_name and device.device_name != dev_name:
+            device.device_name = dev_name
+        if dev_type_str:
+            try:
+                new_type = DeviceType(dev_type_str)
+                if device.device_type != new_type:
+                    device.device_type = new_type
+            except ValueError:
+                pass
+        if dev_fp_str and device.device_fingerprint != dev_fp_str:
+            existing_fp = db.session.scalar(
+                select(Device).where(Device.user_id == user.id, Device.device_fingerprint == dev_fp_str, Device.id != device.id)
+            )
+            if not existing_fp:
+                device.device_fingerprint = dev_fp_str
+
+        device.mark_seen()
+        db.session.commit()
+
+        presence_service.register_socket(
+            sid=sid,
+            user_id=str(user.id),
+            device_id=str(device.id),
+            device_meta={
+                "device_name": device.device_name,
+                "device_type": device.device_type.value if hasattr(device.device_type, "value") else str(device.device_type),
+            },
+        )
+        join_room(f"user_{user.id}")
+        join_room(f"dev_{device.id}")
+
+        emit(
+            "session_ready",
+            {
+                "ok": True,
+                "device_id": str(device.id),
+                "user_id": str(user.id),
+                "device_name": device.device_name,
+                "device_type": device.device_type.value if hasattr(device.device_type, "value") else str(device.device_type),
+            },
+        )
+        _broadcast_device_updates(user.id)
 
     @sio.on("send_offer")
     def handle_send_offer(data):

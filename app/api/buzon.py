@@ -8,7 +8,7 @@ import uuid
 from flask import Blueprint, current_app, jsonify, request, send_file, session
 from sqlalchemy import or_, select
 
-from app.extensions import db
+from app.extensions import db, limiter
 from app.models import MailboxItem, User
 from app.services import MailboxService
 
@@ -63,6 +63,7 @@ def buzon_enviar():
 
 
 @buzon_bp.route("/lista", methods=["GET"])
+@limiter.exempt
 def buzon_lista():
     """List mailbox files intended for or sent by current user."""
     user_id_str = session.get("user_id")

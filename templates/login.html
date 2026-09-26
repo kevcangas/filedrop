@@ -308,6 +308,7 @@
         identifier: document.getElementById("login-ident").value,
         password: document.getElementById("login-pass").value,
         device_name: document.getElementById("login-device").value,
+        device_type: (/android|iphone|ipad|mobile/i.test(navigator.userAgent) ? "mobile" : "pc"),
         device_fingerprint: getFingerprint(),
       };
       const res = await fetch("/api/auth/login", {
@@ -321,6 +322,13 @@
         btn.disabled = false;
         btn.textContent = "Entrar";
         return;
+      }
+      if (data.device && data.device.id) {
+        localStorage.setItem("enlace_device_id", data.device.id);
+        document.cookie = "enlace_device_id=" + encodeURIComponent(data.device.id) + "; path=/; max-age=31536000; SameSite=Lax";
+      }
+      if (data.device && data.device.device_name) {
+        localStorage.setItem("enlace_device_name", data.device.device_name);
       }
       const urlParams = new URLSearchParams(window.location.search);
       window.location.href = urlParams.get("next") || "/";
@@ -357,6 +365,13 @@
         btn.disabled = false;
         btn.textContent = "Registrarme";
         return;
+      }
+      if (data.device && data.device.id) {
+        localStorage.setItem("enlace_device_id", data.device.id);
+        document.cookie = "enlace_device_id=" + encodeURIComponent(data.device.id) + "; path=/; max-age=31536000; SameSite=Lax";
+      }
+      if (data.device && data.device.device_name) {
+        localStorage.setItem("enlace_device_name", data.device.device_name);
       }
       window.location.href = "/";
     } catch (err) {
