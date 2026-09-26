@@ -173,23 +173,15 @@ def get_current_user_and_device():
     if user_id:
         user = db.session.scalar(select(User).where(User.id == to_uuid(user_id), User.is_active == True))
 
-    user_agent = request.headers.get("User-Agent", "").lower()
-    is_mobile = any(m in user_agent for m in ["android", "iphone", "ipad", "mobile"])
-
     if user and device_id:
-        candidate = db.session.scalar(
+        device = db.session.scalar(
             select(Device).where(Device.id == to_uuid(device_id), Device.user_id == user.id, Device.is_active == True)
         )
-        if candidate:
-            is_cand_mobile = candidate.device_type == DeviceType.MOBILE or any(k in candidate.device_name.lower() for k in ["cel", "movil", "phone"])
-            if is_mobile == is_cand_mobile:
-                device = candidate
-            else:
-                # Reject cross-form-factor device (e.g. mobile device ID on PC or vice-versa)
-                device = None
 
     if user and not device:
         from sqlalchemy import or_
+        user_agent = request.headers.get("User-Agent", "").lower()
+        is_mobile = any(m in user_agent for m in ["android", "iphone", "ipad", "mobile"])
 
         # Check client cookie or header for explicit device ID
         candidate_dev_id = request.cookies.get("enlace_device_id") or request.headers.get("X-Device-Id")

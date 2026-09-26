@@ -30,23 +30,18 @@ def verify_socket_session(db_session) -> Tuple[Optional[User], Optional[Device]]
     if not user:
         return None, None
 
-    from app.models import DeviceType
-    user_agent = request.headers.get("User-Agent", "").lower()
-    is_mobile = any(m in user_agent for m in ["android", "iphone", "ipad", "mobile"])
-
     device = None
     dev_uuid = to_uuid(device_id)
     if dev_uuid:
-        candidate = db_session.scalar(
+        device = db_session.scalar(
             select(Device).where(Device.id == dev_uuid, Device.user_id == user.id, Device.is_active == True)
         )
-        if candidate:
-            is_cand_mobile = candidate.device_type == DeviceType.MOBILE or any(k in candidate.device_name.lower() for k in ["cel", "movil", "phone"])
-            if is_mobile == is_cand_mobile:
-                device = candidate
 
     if not device:
         # Match device by form factor for this user
+        from app.models import DeviceType
+        user_agent = request.headers.get("User-Agent", "").lower()
+        is_mobile = any(m in user_agent for m in ["android", "iphone", "ipad", "mobile"])
         target_type = DeviceType.MOBILE if is_mobile else DeviceType.PC
         device = db_session.scalar(
             select(Device).where(
