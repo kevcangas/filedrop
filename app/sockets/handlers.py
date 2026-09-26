@@ -1,0 +1,176 @@
+"""
+Socket.IO Event Handlers for presence, real-time chunk streaming, and secure clipboard sync.
+"""
+
+import uuid
+from flask import request, session
+from flask_socketio import emit, join_room, leave_room
+from sqlalchemy import select
+
+from app.extensions import db, socketio
+from app.models import Device, TransferChannel, TransferLog, TransferStatus, User
+from app.services import presence_service
+from .middleware import verify_friendship_acl, verify_socket_session
+
+
+def register_socket_handlers(sio):
+    """Attach WebSocket event listeners to the SocketIO instance."""
+
+    @sio.on("connect")
+    def handle_connect():
+        user, device = verify_socket_session(db.session)
+        sid = request.sid
+
+        if user and device:
+            # Join user room and device room
+            join_room(f"user_{user.id}")
+            join_room(f"dev_{device.id}")
+            presence_service.register_socket(
+                sid=sid,
+                user_id=str(user.id),
+                device_id=str(device.id),
+                device_meta={"device_name": device.device_name, "device_type": device.device_type.value},
+            )
+            device.mark_seen()
+            db.session.commit()
+            emit("session_ready", {"ok": True, "device_id": str(device.id), "user_id": str(user.id)})
+            _broadcast_device_updates(user.id)
+        else:
+            # Fallback connection for legacy / anonymous clients
+            emit("session_anonymous", {"ok": True, "sid": sid})
+
+    @sio.on("disconnect")
+    def handle_disconnect():
+        sid = request.sid
+        info = presence_service.unregister_socket(sid)
+        if info:
+            user_id = uuid.UUID(info["user_id"])
+            _broadcast_device_updates(user_id)
+
+    @sio.on("register_device")
+    def handle_register_device(data):
+        """Legacy / dynamic device registration hook."""
+        user, device = verify_socket_session(db.session)
+        sid = request.sid
+
+        if not user or not device:
+            # Create or resolve device for current session if logged in
+            user_id_str = session.get("user_id")
+            if user_id_str:
+                user = db.session.scalar(select(User).where(User.id == uuid.UUID(user_id_str)))
+                dev_id_str = (data.get("device_id") or "").strip()
+                if dev_id_str:
+                    try:
+                        device = db.session.scalar(select(Device).where(Device.id == uuid.UUID(dev_id_str)))
+                    except Exception:
+                        device = None
+
+        if user and device:
+            presence_service.register_socket(
+                sid=sid,
+                user_id=str(user.id),
+                device_id=str(device.id),
+                device_meta=data,
+            )
+            join_room(f"user_{user.id}")
+            join_room(f"dev_{device.id}")
+            _broadcast_device_updates(user.id)
+
+    @sio.on("send_offer")
+    def handle_send_offer(data):
+        """
+        Offer a file transfer to target device.
+        Enforces friendship ACL check: target device must belong to same user or accepted friend.
+        """
+        sender_device_id_str = presence_service.get_device_for_sid(request.sid)
+        target_device_id_str = data.get("to_device_id")
+
+        if not sender_device_id_str or not target_device_id_str:
+            emit("transfer_error", {"error": "Invalid sender or target device."})
+            return
+
+        target_sid = presence_service.get_sid_for_device(target_device_id_str)
+        if not target_sid:
+            emit("transfer_error", {"error": "Target device is currently offline."})
+            return
+
+        sender_device = db.session.scalar(select(Device).where(Device.id == uuid.UUID(sender_device_id_str)))
+        target_device = db.session.scalar(select(Device).where(Device.id == uuid.UUID(target_device_id_str)))
+
+        if not sender_device or not target_device:
+            emit("transfer_error", {"error": "Device not found."})
+            return
+
+        # Enforce ACL
+        if not verify_friendship_acl(db.session, sender_device.user_id, target_device.user_id):
+            emit("transfer_error", {"error": "Access denied: You are not connected with this device's owner."})
+            return
+
+        # Forward offer payload with verified sender info
+        payload = {
+            "from_device_id": sender_device_id_str,
+            "sender_device_name": sender_device.device_name,
+            "file_name": data.get("file_name"),
+            "file_size": data.get("file_size"),
+            "file_type": data.get("file_type"),
+            "transfer_id": data.get("transfer_id") or str(uuid.uuid4()),
+        }
+        sio.emit("send_offer", payload, room=target_sid)
+
+    @sio.on("file_response")
+    def handle_file_response(data):
+        """Forward recipient's accept/decline response to sender."""
+        target_device_id = data.get("to_device_id")
+        target_sid = presence_service.get_sid_for_device(target_device_id)
+        if target_sid:
+            sio.emit("file_response", data, room=target_sid)
+
+    @sio.on("file_chunk")
+    def handle_file_chunk(data):
+        """Route binary chunk directly to recipient's socket in memory."""
+        target_device_id = data.get("to_device_id")
+        target_sid = presence_service.get_sid_for_device(target_device_id)
+        if target_sid:
+            sio.emit("file_chunk", data, room=target_sid)
+
+    @sio.on("chunk_ack")
+    def handle_chunk_ack(data):
+        """Route chunk receipt acknowledgement to sender."""
+        target_device_id = data.get("to_device_id")
+        target_sid = presence_service.get_sid_for_device(target_device_id)
+        if target_sid:
+            sio.emit("chunk_ack", data, room=target_sid)
+
+    @sio.on("clipboard_update")
+    def handle_clipboard_update(data):
+        """
+        Sync clipboard strictly to:
+        1. All other active devices belonging to the SAME user.
+        2. Optionally accepted friends if explicit sharing is specified.
+        """
+        sender_device_id = presence_service.get_device_for_sid(request.sid)
+        if not sender_device_id:
+            return
+
+        device = db.session.scalar(select(Device).where(Device.id == uuid.UUID(sender_device_id)))
+        if not device:
+            return
+
+        # Broadcast only to the user's private room, excluding this device
+        user_room = f"user_{device.user_id}"
+        sio.emit(
+            "clipboard_update",
+            {
+                "text": data.get("text"),
+                "sender_device_id": sender_device_id,
+                "sender_name": device.device_name,
+            },
+            room=user_room,
+            skip_sid=request.sid,
+        )
+
+
+def _broadcast_device_updates(user_id: uuid.UUID):
+    """Emit updated visible devices list to the user's active sockets."""
+    visible = presence_service.get_visible_devices_for_user(db.session, user_id)
+    socketio.emit("devices_updated", {"devices": visible}, room=f"user_{user_id}")

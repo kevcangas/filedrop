@@ -42,3 +42,5 @@ dist/
 Thumbs.db
 
 .specs/
+graphify-out/cache/
+graphify-out/.*
