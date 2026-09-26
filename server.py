@@ -66,10 +66,13 @@ if __name__ == "__main__":
 
     with app.app_context():
         try:
-            # Auto-create tables if running with SQLite or fresh Postgres
-            db.create_all()
-        except Exception as ex:
-            print(f"Aviso de Base de Datos: {ex}")
+            from flask_migrate import upgrade
+            upgrade()
+        except Exception:
+            try:
+                db.create_all()
+            except Exception as ex:
+                print(f"Aviso de Base de Datos: {ex}")
 
         # Start Mailbox TTL garbage collector
         mailbox_svc = MailboxService(

@@ -25,11 +25,19 @@ class Config:
     SESSION_COOKIE_SECURE = os.environ.get("ENLACE_HTTPS", "0") == "1"
 
     # Database
+    is_docker = os.path.exists("/.dockerenv") or os.environ.get("POSTGRES_HOST") == "postgres"
+    pg_host = os.environ.get("POSTGRES_HOST", "postgres" if is_docker else "localhost")
     DATABASE_URL = os.environ.get("DATABASE_URL")
+
+    # If running inside Docker and DATABASE_URL mistakenly points to localhost/127.0.0.1, auto-redirect to POSTGRES_HOST
+    if DATABASE_URL and is_docker:
+        for local_target in ("@localhost", "@127.0.0.1", "@::1"):
+            if local_target in DATABASE_URL:
+                DATABASE_URL = DATABASE_URL.replace(local_target, f"@{pg_host}")
+
     if not DATABASE_URL:
         pg_user = os.environ.get("POSTGRES_USER", "enlace")
         pg_pass = os.environ.get("POSTGRES_PASSWORD", "enlace_secret")
-        pg_host = os.environ.get("POSTGRES_HOST", "localhost")
         pg_port = os.environ.get("POSTGRES_PORT", "5432")
         pg_db = os.environ.get("POSTGRES_DB", "enlace_db")
         DATABASE_URL = f"postgresql+psycopg2://{pg_user}:{pg_pass}@{pg_host}:{pg_port}/{pg_db}"
