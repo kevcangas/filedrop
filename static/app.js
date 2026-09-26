@@ -516,12 +516,21 @@
       const rowId = addTransferRow(file.name, file.size, "up");
       try {
         if (typeof window.uploadToS3 === "function") {
-          await window.uploadToS3(file, (p) => updateTransferProgress(rowId, p));
+          await new Promise((resolve, reject) => {
+            window.uploadToS3(file, {
+              userId: myUserId,
+              onProgress: (p) => updateTransferProgress(rowId, p),
+              onDone: (res) => resolve(res),
+              onError: (status, err) => reject(new Error(err || `HTTP ${status}`)),
+            });
+          });
           finishTransferRow(rowId, true);
+        } else {
+          throw new Error("Módulo de subida S3 no inicializado.");
         }
       } catch (err) {
         finishTransferRow(rowId, false);
-        toast(`Error al subir ${file.name} a S3`, true);
+        toast(`Error al subir ${file.name} a S3: ${err.message}`, true);
       }
     }
     toast("Subida a S3 finalizada.");
@@ -533,12 +542,23 @@
       const rowId = addTransferRow(file.name, file.size, "up");
       try {
         if (typeof window.uploadToBuzon === "function") {
-          await window.uploadToBuzon(file, (p) => updateTransferProgress(rowId, p));
+          await new Promise((resolve, reject) => {
+            window.uploadToBuzon(file, {
+              targetDeviceId: selectedDeviceId,
+              fromDeviceId: myDeviceId,
+              fromDeviceName: myDeviceName,
+              onProgress: (p) => updateTransferProgress(rowId, p),
+              onDone: (res) => resolve(res),
+              onError: (status, err) => reject(new Error(err || `HTTP ${status}`)),
+            });
+          });
           finishTransferRow(rowId, true);
+        } else {
+          throw new Error("Módulo de buzón no inicializado.");
         }
       } catch (err) {
         finishTransferRow(rowId, false);
-        toast(`Error al depositar en buzón`, true);
+        toast(`Error al depositar en buzón: ${err.message}`, true);
       }
     }
     toast("Archivo(s) depositados en el buzón.");

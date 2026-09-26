@@ -23,10 +23,27 @@ class S3Service:
         self._lock = threading.Lock()
         self._bucket_verified = False
 
+    def _get_config(self, key: str, default=None):
+        """Retrieve config value whether config is a Flask Config dict or object."""
+        if self.config is None:
+            return default
+        if isinstance(self.config, dict) or hasattr(self.config, "get"):
+            val = self.config.get(key)
+            if val is not None:
+                return val
+        return getattr(self.config, key, default)
+
+    @property
+    def bucket_name(self) -> str:
+        return self._get_config("S3_BUCKET", "filedrop-storage")
+
     def is_enabled(self) -> bool:
         if not self.config:
             return False
-        return getattr(self.config, "S3_ENABLED", False)
+        val = self._get_config("S3_ENABLED", False)
+        if isinstance(val, str):
+            return val.strip().lower() in ("1", "true", "yes")
+        return bool(val)
 
     def get_client(self):
         """Lazily initialize and cache the thread-safe boto3 S3 client."""
@@ -37,29 +54,65 @@ class S3Service:
             if self._client is not None:
                 return self._client
 
+            endpoint_url = self._get_config("S3_ENDPOINT_URL")
+            region_name = self._get_config("S3_REGION", "us-east-1")
+            access_key = self._get_config("S3_ACCESS_KEY")
+            secret_key = self._get_config("S3_SECRET_KEY")
+
             boto_cfg = BotoConfig(
                 signature_version="s3v4",
-                s3={"addressing_style": "path"} if getattr(self.config, "S3_ENDPOINT_URL", None) else {},
+                s3={"addressing_style": "path"} if endpoint_url else {},
                 retries={"max_attempts": 3, "mode": "standard"},
             )
             kwargs = {
                 "service_name": "s3",
-                "region_name": getattr(self.config, "S3_REGION", "us-east-1"),
+                "region_name": region_name or "us-east-1",
                 "config": boto_cfg,
             }
-            if getattr(self.config, "S3_ENDPOINT_URL", None):
-                kwargs["endpoint_url"] = self.config.S3_ENDPOINT_URL
-            if getattr(self.config, "S3_ACCESS_KEY", None):
-                kwargs["aws_access_key_id"] = self.config.S3_ACCESS_KEY
-            if getattr(self.config, "S3_SECRET_KEY", None):
-                kwargs["aws_secret_access_key"] = self.config.S3_SECRET_KEY
+            if endpoint_url:
+                kwargs["endpoint_url"] = endpoint_url
+            if access_key:
+                kwargs["aws_access_key_id"] = access_key
+            if secret_key:
+                kwargs["aws_secret_access_key"] = secret_key
 
             self._client = boto3.client(**kwargs)
             return self._client
 
+    def ensure_bucket_exists(self) -> None:
+        """Verify target bucket exists or auto-create if configured."""
+        if self._bucket_verified:
+            return
+        client = self.get_client()
+        if not client:
+            return
+
+        bucket = self.bucket_name
+        auto_create = self._get_config("S3_AUTO_CREATE_BUCKET", True)
+        if isinstance(auto_create, str):
+            auto_create = auto_create.strip() in ("1", "true", "True")
+
+        try:
+            client.head_bucket(Bucket=bucket)
+            self._bucket_verified = True
+        except Exception:
+            if auto_create:
+                try:
+                    region = self._get_config("S3_REGION", "us-east-1")
+                    if region and region != "us-east-1":
+                        client.create_bucket(
+                            Bucket=bucket,
+                            CreateBucketConfiguration={"LocationConstraint": region},
+                        )
+                    else:
+                        client.create_bucket(Bucket=bucket)
+                    self._bucket_verified = True
+                except Exception as ex:
+                    print(f"[S3Service] Could not auto-create bucket '{bucket}': {ex}")
+
     def get_user_prefix(self, user_id: str, device_id: Optional[str] = None) -> str:
         """Construct secure prefix: users/{user_id}/"""
-        base = getattr(self.config, "S3_PREFIX", "users/").strip("/")
+        base = self._get_config("S3_PREFIX", "users/").strip("/")
         if device_id:
             return f"{base}/{user_id}/{device_id}/"
         return f"{base}/{user_id}/"
@@ -77,6 +130,8 @@ class S3Service:
         if not client:
             raise RuntimeError("S3 service is not enabled or configured.")
 
+        self.ensure_bucket_exists()
+
         clean_name = secure_filename(filename) or f"upload_{uuid.uuid4().hex[:8]}"
         prefix = self.get_user_prefix(user_id)
         if subfolder:
@@ -92,7 +147,7 @@ class S3Service:
 
         client.upload_fileobj(
             file_obj,
-            self.config.S3_BUCKET,
+            self.bucket_name,
             s3_key,
             ExtraArgs={"ContentType": content_type},
         )
@@ -104,31 +159,93 @@ class S3Service:
             "content_type": content_type,
         }
 
-    def list_files(self, user_id: str, subfolder: str = "") -> List[dict]:
-        """List all objects stored under the user's isolated prefix."""
+    def list_objects(self, user_id: str, subfolder: str = "") -> dict:
+        """List folders and files under the user's isolated subfolder."""
         client = self.get_client()
         if not client:
-            return []
+            return {"folders": [], "files": []}
+
+        self.ensure_bucket_exists()
 
         prefix = self.get_user_prefix(user_id)
         if subfolder:
             prefix += subfolder.strip("/") + "/"
 
         paginator = client.get_paginator("list_objects_v2")
-        results = []
-        for page in paginator.paginate(Bucket=self.config.S3_BUCKET, Prefix=prefix):
+        files = []
+        folders = set()
+
+        for page in paginator.paginate(Bucket=self.bucket_name, Prefix=prefix, Delimiter="/"):
+            # Subfolders (CommonPrefixes)
+            for cp in page.get("CommonPrefixes", []):
+                p = cp.get("Prefix", "")
+                folder_name = p[len(prefix):].strip("/")
+                if folder_name:
+                    folders.add(folder_name)
+
+            # Files
             for obj in page.get("Contents", []):
                 key = obj["Key"]
-                if key.endswith("/"):
-                    continue  # folder marker
+                if key == prefix or key.endswith("/"):
+                    continue  # Directory placeholder
                 name = key[len(prefix):]
-                results.append({
+                if "/" in name:
+                    # Belongs to subfolder
+                    folders.add(name.split("/")[0])
+                    continue
+                files.append({
                     "key": key,
                     "filename": name,
                     "size": obj["Size"],
                     "last_modified": obj["LastModified"].isoformat(),
                 })
-        return results
+
+        return {"folders": sorted(list(folders)), "files": files}
+
+    def list_files(self, user_id: str, subfolder: str = "") -> List[dict]:
+        """Backward compatible list returning files list."""
+        return self.list_objects(user_id, subfolder).get("files", [])
+
+    def create_folder(self, user_id: str, folder_path: str) -> bool:
+        """Create a zero-byte directory marker object."""
+        client = self.get_client()
+        if not client:
+            raise RuntimeError("S3 service is not enabled.")
+
+        self.ensure_bucket_exists()
+
+        clean_path = folder_path.strip("/")
+        if not clean_path:
+            return False
+
+        key = f"{self.get_user_prefix(user_id)}{clean_path}/"
+        client.put_object(Bucket=self.bucket_name, Key=key, Body=b"")
+        return True
+
+    def delete_folder(self, user_id: str, folder_path: str) -> bool:
+        """Delete all objects stored within a folder prefix."""
+        client = self.get_client()
+        if not client:
+            raise RuntimeError("S3 service is not enabled.")
+
+        clean_path = folder_path.strip("/")
+        if not clean_path:
+            return False
+
+        folder_prefix = f"{self.get_user_prefix(user_id)}{clean_path}/"
+        paginator = client.get_paginator("list_objects_v2")
+        delete_keys = []
+
+        for page in paginator.paginate(Bucket=self.bucket_name, Prefix=folder_prefix):
+            for obj in page.get("Contents", []):
+                delete_keys.append({"Key": obj["Key"]})
+
+        if delete_keys:
+            client.delete_objects(
+                Bucket=self.bucket_name,
+                Delete={"Objects": delete_keys},
+            )
+        return True
 
     def generate_presigned_url(self, user_id: str, s3_key: str, expiry_seconds: int = 3600) -> str:
         """Generate a presigned GET URL after verifying the key belongs to user_id."""
@@ -139,7 +256,7 @@ class S3Service:
         client = self.get_client()
         return client.generate_presigned_url(
             "get_object",
-            Params={"Bucket": self.config.S3_BUCKET, "Key": s3_key},
+            Params={"Bucket": self.bucket_name, "Key": s3_key},
             ExpiresIn=expiry_seconds,
         )
 
@@ -150,5 +267,5 @@ class S3Service:
             raise PermissionError("Access denied: Cannot delete other users' files.")
 
         client = self.get_client()
-        client.delete_object(Bucket=self.config.S3_BUCKET, Key=s3_key)
+        client.delete_object(Bucket=self.bucket_name, Key=s3_key)
         return True

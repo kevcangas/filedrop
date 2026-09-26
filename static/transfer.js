@@ -980,4 +980,18 @@ function refreshS3FilesList(options = {}) {
   }
 }
 
+// Exportar explícitamente a window para compatibilidad global
+if (typeof window !== "undefined") {
+  window.uploadToS3 = uploadToS3;
+  window.uploadToBuzon = uploadToBuzon;
+  window.loadS3Explorer = loadS3Explorer;
+  window.setupS3ExplorerEvents = setupS3ExplorerEvents;
+  window.refreshS3FilesList = refreshS3FilesList;
+  window.fetchS3Files = fetchS3Files;
+  window.createS3Folder = createS3Folder;
+  window.deleteS3Folder = deleteS3Folder;
+  window.deleteS3File = deleteS3File;
+}
+
+
 
