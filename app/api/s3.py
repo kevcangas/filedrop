@@ -42,6 +42,7 @@ def s3_status():
         "ok": True,
         "enabled": enabled,
         "configured": configured,
+        "connected": configured,
         "bucket": svc.bucket_name,
         "user_prefix": svc.get_user_prefix(get_effective_user_id()),
         "error": error,

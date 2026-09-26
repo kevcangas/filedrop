@@ -1,4 +1,4 @@
-const CACHE_NAME = "enlace-shell-v8";
+const CACHE_NAME = "enlace-shell-v9";
 const SHELL_FILES = [
   "/manifest.json",
   "/static/style.css",

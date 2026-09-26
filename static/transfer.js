@@ -55,6 +55,18 @@ function formatBytes(bytes) {
   return (bytes / (1024 * 1024)).toFixed(1) + " MB";
 }
 
+function escapeHtml(s) {
+  if (!s) return "";
+  const div = document.createElement("div");
+  div.textContent = s;
+  return div.innerHTML;
+}
+
+if (typeof window !== "undefined") {
+  window.escapeHtml = escapeHtml;
+}
+
+
 /* =========================================================================
  * VISTA PREVIA (imagenes / video) antes de aceptar
  * ====================================================================== */
@@ -657,7 +669,7 @@ async function loadS3Explorer(options = {}) {
     return;
   }
 
-  if (!s3CurrentStatus.connected) {
+  if (!s3CurrentStatus.connected && !s3CurrentStatus.configured) {
     filesListEl.innerHTML = `
       <div style="padding:20px; text-align:center;">
         <p style="font-size:14px; color:var(--danger); margin:0 0 8px 0;">⚠️ No se pudo conectar al bucket S3.</p>
