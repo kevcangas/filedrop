@@ -30,19 +30,37 @@ def verify_socket_session(db_session) -> Tuple[Optional[User], Optional[Device]]
     if not user:
         return None, None
 
+    from app.models import DeviceType
+    user_agent = request.headers.get("User-Agent", "").lower()
+    is_mobile = any(m in user_agent for m in ["android", "iphone", "ipad", "mobile"])
+
     device = None
     dev_uuid = to_uuid(device_id)
     if dev_uuid:
-        device = db_session.scalar(
+        candidate = db_session.scalar(
             select(Device).where(Device.id == dev_uuid, Device.user_id == user.id, Device.is_active == True)
         )
+        if candidate:
+            is_cand_mobile = candidate.device_type == DeviceType.MOBILE or any(k in candidate.device_name.lower() for k in ["cel", "movil", "phone"])
+            if is_mobile == is_cand_mobile:
+                device = candidate
+
     if not device:
-        # Only fall back if the user has exactly 1 enrolled device to prevent identity hijacking
-        all_devs = db_session.scalars(
-            select(Device).where(Device.user_id == user.id, Device.is_active == True)
-        ).all()
-        if len(all_devs) == 1:
-            device = all_devs[0]
+        # Match device by form factor for this user
+        target_type = DeviceType.MOBILE if is_mobile else DeviceType.PC
+        device = db_session.scalar(
+            select(Device).where(
+                Device.user_id == user.id,
+                Device.is_active == True,
+                or_(
+                    Device.device_type == target_type,
+                    Device.device_name.ilike("%cel%" if is_mobile else "%pc%"),
+                    Device.device_name.ilike("%movil%" if is_mobile else "%laptop%"),
+                    Device.device_name.ilike("%phone%" if is_mobile else "%escritorio%"),
+                ),
+            ).order_by(Device.last_seen_at.desc())
+        )
+        if device:
             session["device_id"] = str(device.id)
 
     return user, device

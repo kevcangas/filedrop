@@ -22,6 +22,7 @@ def register_socket_handlers(sio):
         sid = request.sid
 
         if user and device:
+            print(f"[SocketIO] Connect: sid={sid} user={user.username} device={device.device_name} ({device.device_type}) id={device.id}", flush=True)
             # Join user room and device room
             join_room(f"user_{user.id}")
             join_room(f"dev_{device.id}")
@@ -36,6 +37,7 @@ def register_socket_handlers(sio):
             emit("session_ready", {"ok": True, "device_id": str(device.id), "user_id": str(user.id)})
             _broadcast_device_updates(user.id)
         else:
+            print(f"[SocketIO] Connect (anonymous): sid={sid} user={user.username if user else None}", flush=True)
             # Fallback connection for legacy / anonymous clients
             emit("session_anonymous", {"ok": True, "sid": sid})
 
@@ -43,6 +45,7 @@ def register_socket_handlers(sio):
     def handle_disconnect():
         sid = request.sid
         info = presence_service.unregister_socket(sid)
+        print(f"[SocketIO] Disconnect: sid={sid} info={info}", flush=True)
         if info:
             user_id = uuid.UUID(info["user_id"])
             _broadcast_device_updates(user_id)
@@ -163,6 +166,8 @@ def register_socket_handlers(sio):
         )
         join_room(f"user_{user.id}")
         join_room(f"dev_{device.id}")
+
+        print(f"[SocketIO] Register: sid={sid} user={user.username} device={device.device_name} ({device.device_type}) id={device.id}", flush=True)
 
         emit(
             "session_ready",

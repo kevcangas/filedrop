@@ -27,9 +27,10 @@
   let serverDevice = window.__FILEDROP_DEVICE__ || {};
   let serverDeviceId = serverDevice.id || "";
   let serverDeviceType = (serverDevice.device_type || "").toLowerCase();
+  let serverDevName = (serverDevice.device_name || "").toLowerCase();
 
   let myDeviceId = "";
-  if (serverDeviceId && ((isMobileClient && (serverDeviceType === "mobile" || serverDevice.device_name.toLowerCase().includes("cel"))) || (!isMobileClient && (serverDeviceType === "pc" || serverDevice.device_name.toLowerCase().includes("pc"))))) {
+  if (serverDeviceId && ((isMobileClient && (serverDeviceType === "mobile" || serverDevName.includes("cel"))) || (!isMobileClient && (serverDeviceType === "pc" || serverDevName.includes("pc"))))) {
     myDeviceId = serverDeviceId;
     localStorage.setItem("enlace_device_id", serverDeviceId);
     localStorage.setItem("enlace_device_type", isMobileClient ? "mobile" : "pc");
