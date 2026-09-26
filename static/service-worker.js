@@ -1,11 +1,11 @@
-const CACHE_NAME = "enlace-shell-v5";
+const CACHE_NAME = "enlace-shell-v6";
 const SHELL_FILES = [
   "/manifest.json",
   "/static/style.css",
+  "/static/app.js",
   "/static/transfer.js",
-  "/static/notifications.js",
-  "/static/pc.js",
-  "/static/remote.js",
+  "/static/friends.js",
+  "/static/activity-logger.js",
   "/static/socket.io.min.js",
   "/static/jszip.min.js",
   "/static/icons/icon-192.png",

@@ -137,11 +137,21 @@ def app_view():
 @web_bp.route("/manifest.json")
 def manifest():
     """Serve PWA manifest."""
-    return send_from_directory(
-        os.path.join(current_app.root_path, "..", "static"),
-        "manifest.json",
-        mimetype="application/manifest+json",
-    )
+    return jsonify({
+        "name": "Filedrop (Enlace)",
+        "short_name": "Filedrop",
+        "description": "Transferencia de archivos de alta velocidad, portapapeles y almacenamiento en la nube S3",
+        "start_url": "/",
+        "scope": "/",
+        "display": "standalone",
+        "background_color": "#0b1118",
+        "theme_color": "#0c1420",
+        "orientation": "any",
+        "icons": [
+            {"src": "/static/icons/icon-192.png", "sizes": "192x192", "type": "image/png"},
+            {"src": "/static/icons/icon-512.png", "sizes": "512x512", "type": "image/png"},
+        ],
+    })
 
 
 @web_bp.route("/service-worker.js")
