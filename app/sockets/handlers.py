@@ -166,6 +166,12 @@ def register_socket_handlers(sio):
                 "device_type": device.device_type.value if hasattr(device.device_type, "value") else str(device.device_type),
             },
         )
+        # Also register the client's provided device_id string if different from matched device UUID
+        if dev_id_str and dev_id_str != str(device.id):
+            with presence_service._lock:
+                presence_service._device_to_sid[dev_id_str] = sid
+                presence_service._device_to_sid[dev_id_str.lower()] = sid
+
         join_room(f"user_{user.id}")
         join_room(f"dev_{device.id}")
 
@@ -181,48 +187,28 @@ def register_socket_handlers(sio):
                 "device_type": device.device_type.value if hasattr(device.device_type, "value") else str(device.device_type),
             },
         )
+        emit("registered", {"device_id": str(device.id)})
         _broadcast_device_updates(user.id)
 
     @sio.on("send_offer")
     def handle_send_offer(data):
         """
-        Offer a file transfer to target device.
-        Routes to active socket SID, device room, and user room for guaranteed delivery.
+        Original direct RAM relay: Un dispositivo ofrece un archivo a otro (por target_device_id).
+        Rutas directas en memoria a través de Socket.IO SID sin consultas bloqueantes a DB.
         """
-        sender_device_id_str = data.get("from_device_id") or presence_service.get_device_for_sid(request.sid) or session.get("device_id")
-        target_device_id_str = data.get("target_device_id") or data.get("to_device_id")
+        target_device_id = data.get("target_device_id") or data.get("to_device_id")
+        target_sid = presence_service.get_sid_for_device(target_device_id, exclude_sid=request.sid)
 
-        if not sender_device_id_str or not target_device_id_str:
-            emit("transfer_error", {"error": "Destinatario o emisor no especificado."})
+        print(f"[SocketIO] send_offer: from_sid={request.sid} to_dev={target_device_id} -> target_sid={target_sid}", flush=True)
+
+        if not target_sid:
+            emit("notice", {"text": "El dispositivo destino ya no está disponible."})
+            emit("transfer_error", {"error": "El dispositivo destino no está conectado o disponible."})
             return
 
-        from app.models import to_uuid
-        sender_uuid = to_uuid(sender_device_id_str)
-        target_uuid = to_uuid(target_device_id_str)
-
-        sender_device = db.session.scalar(select(Device).where(Device.id == sender_uuid)) if sender_uuid else None
-        target_device = db.session.scalar(select(Device).where(Device.id == target_uuid)) if target_uuid else None
-
-        sender_user_id = str(sender_device.user_id) if sender_device else (presence_service.get_user_for_sid(request.sid) or session.get("user_id"))
-        target_user_id = str(target_device.user_id) if target_device else sender_user_id
-
-        # Enforce ACL if both devices are tracked in DB
-        if sender_device and target_device:
-            if not verify_friendship_acl(db.session, sender_device.user_id, target_device.user_id):
-                emit("transfer_error", {"error": "Acceso denegado: no estás conectado con el propietario de este dispositivo."})
-                return
-            is_own = sender_device.user_id == target_device.user_id
-            sender_name = sender_device.device_name
-        else:
-            is_own = bool(sender_user_id and target_user_id and str(sender_user_id) == str(target_user_id))
-            sender_name = data.get("from_device_name") or "Dispositivo"
-
-        target_sid = presence_service.get_sid_for_device(
-            device_id=target_device_id_str,
-            user_id=target_user_id,
-            exclude_sid=request.sid,
-        )
-        print(f"[SocketIO] send_offer: from={sender_device_id_str} to={target_device_id_str} target_user={target_user_id} sid={target_sid} is_own={is_own}", flush=True)
+        sender_dev_id = data.get("from_device_id") or presence_service.get_device_for_sid(request.sid) or session.get("device_id")
+        sender_info = presence_service.get_info_for_sid(request.sid) or {}
+        sender_name = data.get("from_device_name") or (sender_info.get("meta") or {}).get("device_name") or "Dispositivo"
 
         file_name = data.get("filename") or data.get("file_name") or "archivo"
         file_size = data.get("size") or data.get("file_size") or 0
@@ -231,10 +217,10 @@ def register_socket_handlers(sio):
 
         payload = dict(data)
         payload.update({
-            "from_device_id": str(sender_device_id_str),
-            "_from_device_id": str(sender_device_id_str),
-            "sender_device_name": sender_name,
+            "_from_device_id": str(sender_dev_id),
+            "from_device_id": str(sender_dev_id),
             "_from_device_name": sender_name,
+            "sender_device_name": sender_name,
             "file_name": file_name,
             "filename": file_name,
             "file_size": file_size,
@@ -243,123 +229,70 @@ def register_socket_handlers(sio):
             "mimetype": file_type,
             "transfer_id": transfer_id,
             "file_id": transfer_id,
-            "is_own_account": is_own,
-            "auto_accept": is_own,
+            "auto_accept": True,
+            "is_own_account": True,
         })
 
-        # Deliver to target SID, target device room, and target user room
-        if target_sid:
-            sio.emit("send_offer", payload, room=target_sid)
-            sio.emit("file_offer", payload, room=target_sid)
-        if target_device_id_str:
-            dev_room = f"dev_{target_device_id_str}"
-            sio.emit("send_offer", payload, room=dev_room)
-            sio.emit("file_offer", payload, room=dev_room)
-        if target_user_id:
-            sio.emit("send_offer", payload, room=f"user_{target_user_id}", skip_sid=request.sid)
-            sio.emit("file_offer", payload, room=f"user_{target_user_id}", skip_sid=request.sid)
+        emit("file_offer", payload, to=target_sid)
+        emit("send_offer", payload, to=target_sid)
 
     @sio.on("file_response")
     def handle_file_response(data):
-        """Forward recipient's accept/decline response to sender."""
+        """Original direct RAM relay: El destino acepta o rechaza el archivo ofrecido."""
         target_device_id = data.get("target_device_id") or data.get("to_device_id")
-        sender_user_id = presence_service.get_user_for_sid(request.sid) or session.get("user_id")
-
-        target_sid = presence_service.get_sid_for_device(
-            device_id=target_device_id,
-            user_id=sender_user_id,
-            exclude_sid=request.sid,
-        )
-        print(f"[SocketIO] file_response: to={target_device_id} sid={target_sid} accept={data.get('accept')}", flush=True)
-
+        target_sid = presence_service.get_sid_for_device(target_device_id, exclude_sid=request.sid)
+        print(f"[SocketIO] file_response: to={target_device_id} target_sid={target_sid} accept={data.get('accept')}", flush=True)
         if target_sid:
-            sio.emit("file_response", data, room=target_sid)
-            sio.emit("file_response_relay", data, room=target_sid)
-        if target_device_id:
-            sio.emit("file_response", data, room=f"dev_{target_device_id}")
-            sio.emit("file_response_relay", data, room=f"dev_{target_device_id}")
-        if sender_user_id:
-            sio.emit("file_response", data, room=f"user_{sender_user_id}", skip_sid=request.sid)
-            sio.emit("file_response_relay", data, room=f"user_{sender_user_id}", skip_sid=request.sid)
+            emit("file_response_relay", data, to=target_sid)
+            emit("file_response", data, to=target_sid)
 
     @sio.on("file_chunk")
     def handle_file_chunk(data):
-        """Route binary chunk directly to recipient's socket in memory."""
+        """Original direct RAM relay: Reenvía un fragmento binario de un dispositivo a otro en RAM pura."""
         target_device_id = data.get("target_device_id") or data.get("to_device_id")
-        sender_user_id = presence_service.get_user_for_sid(request.sid) or session.get("user_id")
-
-        target_sid = presence_service.get_sid_for_device(
-            device_id=target_device_id,
-            user_id=sender_user_id,
-            exclude_sid=request.sid,
-        )
-        sender_dev_id = presence_service.get_device_for_sid(request.sid) or data.get("from_device_id")
-
+        target_sid = presence_service.get_sid_for_device(target_device_id, exclude_sid=request.sid)
+        if not target_sid:
+            return
+        sender_dev_id = data.get("from_device_id") or presence_service.get_device_for_sid(request.sid)
         payload = dict(data)
-        payload["_from_device_id"] = sender_dev_id
-        payload["from_device_id"] = sender_dev_id
-
-        if target_sid:
-            sio.emit("file_chunk", payload, room=target_sid)
-            sio.emit("file_chunk_relay", payload, room=target_sid)
-        if target_device_id:
-            sio.emit("file_chunk", payload, room=f"dev_{target_device_id}")
-            sio.emit("file_chunk_relay", payload, room=f"dev_{target_device_id}")
-        if sender_user_id:
-            sio.emit("file_chunk", payload, room=f"user_{sender_user_id}", skip_sid=request.sid)
-            sio.emit("file_chunk_relay", payload, room=f"user_{sender_user_id}", skip_sid=request.sid)
+        payload["_from_device_id"] = str(sender_dev_id)
+        payload["from_device_id"] = str(sender_dev_id)
+        emit("file_chunk_relay", payload, to=target_sid)
+        emit("file_chunk", payload, to=target_sid)
 
     @sio.on("chunk_ack")
     def handle_chunk_ack(data):
-        """Route chunk receipt acknowledgement to sender."""
+        """Original direct RAM relay: Confirmación de fragmento recibido hacia el emisor."""
         target_device_id = data.get("target_device_id") or data.get("to_device_id")
-        sender_user_id = presence_service.get_user_for_sid(request.sid) or session.get("user_id")
-
-        target_sid = presence_service.get_sid_for_device(
-            device_id=target_device_id,
-            user_id=sender_user_id,
-            exclude_sid=request.sid,
-        )
-
+        target_sid = presence_service.get_sid_for_device(target_device_id, exclude_sid=request.sid)
         if target_sid:
-            sio.emit("chunk_ack", data, room=target_sid)
-            sio.emit("chunk_ack_relay", data, room=target_sid)
-        if target_device_id:
-            sio.emit("chunk_ack", data, room=f"dev_{target_device_id}")
-            sio.emit("chunk_ack_relay", data, room=f"dev_{target_device_id}")
-        if sender_user_id:
-            sio.emit("chunk_ack", data, room=f"user_{sender_user_id}", skip_sid=request.sid)
-            sio.emit("chunk_ack_relay", data, room=f"user_{sender_user_id}", skip_sid=request.sid)
+            emit("chunk_ack_relay", data, to=target_sid)
+            emit("chunk_ack", data, to=target_sid)
 
     @sio.on("clipboard_update")
     def handle_clipboard_update(data):
-        """
-        Sync clipboard strictly to:
-        1. All other active devices belonging to the SAME user.
-        2. Optionally accepted friends if explicit sharing is specified.
-        """
-        sender_device_id = presence_service.get_device_for_sid(request.sid)
-        from app.models import to_uuid
-        dev_u = to_uuid(sender_device_id)
-        if not dev_u:
-            return
-
-        device = db.session.scalar(select(Device).where(Device.id == dev_u))
-        if not device:
-            return
-
-        # Broadcast only to the user's private room, excluding this device
-        user_room = f"user_{device.user_id}"
-        sio.emit(
-            "clipboard_update",
-            {
-                "text": data.get("text"),
-                "sender_device_id": sender_device_id,
-                "sender_name": device.device_name,
-            },
-            room=user_room,
-            skip_sid=request.sid,
-        )
+        """Original direct RAM relay: Sincronización de portapapeles."""
+        sender_dev_id = presence_service.get_device_for_sid(request.sid)
+        sender_info = presence_service.get_info_for_sid(request.sid) or {}
+        dev_name = (sender_info.get("meta") or {}).get("device_name", "Dispositivo")
+        import time
+        entry = {
+            "text": data.get("text", ""),
+            "from_device_id": sender_dev_id,
+            "from_device_name": dev_name,
+            "ts": time.time(),
+        }
+        target_device_id = data.get("target_device_id")
+        if target_device_id:
+            target_sid = presence_service.get_sid_for_device(target_device_id, exclude_sid=request.sid)
+            if target_sid:
+                emit("clipboard_update_relay", entry, to=target_sid)
+                emit("clipboard_update", entry, to=target_sid)
+        else:
+            for s in list(presence_service._sid_to_info.keys()):
+                if s != request.sid:
+                    emit("clipboard_update_relay", entry, to=s)
+                    emit("clipboard_update", entry, to=s)
 
 
 def _broadcast_device_updates(user_id):
