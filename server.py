@@ -3,6 +3,9 @@ Enlace (Filedrop) - Servidor de Transferencia Directa y Gestión Multi-Usuario
 Entrypoint del servidor web Flask-SocketIO.
 """
 
+from gevent import monkey
+monkey.patch_all()
+
 import os
 import socket
 import sys
