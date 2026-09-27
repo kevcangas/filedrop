@@ -596,8 +596,8 @@
     return rowId;
   }
 
-  function updateTransferProgress(rowId, progressFraction) {
-    const pct = Math.min(100, Math.round(progressFraction * 100));
+  function updateTransferProgress(rowId, progressValue) {
+    const pct = progressValue > 1 ? Math.min(100, Math.round(progressValue)) : Math.min(100, Math.round(progressValue * 100));
     const fill = document.getElementById(`${rowId}-fill`);
     const status = document.getElementById(`${rowId}-status`);
     if (fill) fill.style.width = `${pct}%`;
@@ -813,17 +813,19 @@
     const list = document.getElementById("buzon-list");
     if (!list) return;
     try {
-      const res = await fetch("/api/mailbox");
+      let res = await fetch("/api/buzon/lista");
+      if (!res.ok) res = await fetch("/api/mailbox");
       const data = await res.json();
-      if (!res.ok || !data.ok) return;
+      if (!data || !data.ok) return;
 
       list.innerHTML = "";
-      if (!data.items || data.items.length === 0) {
+      const rawItems = data.items || data.archivos || [];
+      if (rawItems.length === 0) {
         list.innerHTML = '<p class="empty-hint">El buzón está vacío.</p>';
         return;
       }
 
-      data.items.forEach((item) => {
+      rawItems.forEach((item) => {
         const row = document.createElement("div");
         row.className = "buzon-item";
         row.innerHTML = `
@@ -833,7 +835,7 @@
               <div class="buzon-meta">${formatBytes(item.file_size)} · Expira: ${item.expires_at || "24h"}</div>
             </div>
             <div class="row" style="gap:6px;">
-              <a href="/api/mailbox/${item.id}/download" class="button primary" style="font-size:12px; padding:4px 8px; text-decoration:none;">⬇️ Descargar</a>
+              <a href="/api/buzon/descargar/${item.id}" class="button primary" style="font-size:12px; padding:4px 8px; text-decoration:none;">⬇️ Descargar</a>
               <button class="btn-danger btn-delete-buzon" data-id="${item.id}" style="font-size:12px; padding:4px 8px;">🗑️</button>
             </div>
           </div>
@@ -843,7 +845,8 @@
 
       list.querySelectorAll(".btn-delete-buzon").forEach((btn) => {
         btn.onclick = async () => {
-          await fetch(`/api/mailbox/${btn.dataset.id}`, { method: "DELETE" });
+          let delRes = await fetch(`/api/buzon/borrar/${btn.dataset.id}`, { method: "POST" });
+          if (!delRes.ok) await fetch(`/api/mailbox/${btn.dataset.id}`, { method: "DELETE" });
           refreshBuzon();
         };
       });

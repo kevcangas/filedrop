@@ -13,7 +13,7 @@ from app.api.auth import auth_bp
 from app.api.friends import friends_bp
 from app.api.devices import devices_bp
 from app.api.logs import logs_bp
-from app.api.buzon import buzon_bp
+from app.api.buzon import buzon_bp, mailbox_bp
 from app.api.s3 import s3_bp
 from app.views.web import web_bp
 from app.sockets import register_socket_handlers
@@ -46,6 +46,7 @@ def create_app(config_class=Config) -> Flask:
     app.register_blueprint(devices_bp)
     app.register_blueprint(logs_bp)
     app.register_blueprint(buzon_bp)
+    app.register_blueprint(mailbox_bp)
     app.register_blueprint(s3_bp)
 
     # Register Web View Blueprint

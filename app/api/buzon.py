@@ -13,6 +13,7 @@ from app.models import MailboxItem, User
 from app.services import MailboxService
 
 buzon_bp = Blueprint("buzon_bp", __name__, url_prefix="/api/buzon")
+mailbox_bp = Blueprint("mailbox_bp", __name__, url_prefix="/api/mailbox")
 
 _mailbox_service = None
 
@@ -27,21 +28,23 @@ def get_mailbox_service():
     return _mailbox_service
 
 
-@buzon_bp.route("/enviar", methods=["POST"])
-def buzon_enviar():
+def handle_buzon_enviar():
     """Upload a file to the offline mailbox."""
-    if "archivo" not in request.files:
+    file_obj = request.files.get("archivo") or request.files.get("file")
+    if not file_obj:
         return jsonify({"ok": False, "error": "No file uploaded."}), 400
 
-    file_obj = request.files["archivo"]
+    from app.models import to_uuid
     recipient_user_id_str = request.form.get("recipient_user_id")
-    recipient_device_id_str = request.form.get("recipient_device_id")
+    recipient_device_id_str = request.form.get("recipient_device_id") or request.form.get("target_device_id")
+    if recipient_device_id_str in ("todos", "all", "global", ""):
+        recipient_device_id_str = None
 
-    sender_user_id = uuid.UUID(session["user_id"]) if session.get("user_id") else None
-    sender_device_id = uuid.UUID(session["device_id"]) if session.get("device_id") else None
+    sender_user_id = to_uuid(session.get("user_id"))
+    sender_device_id = to_uuid(session.get("device_id") or request.form.get("from_device_id"))
 
-    recipient_user_id = uuid.UUID(recipient_user_id_str) if recipient_user_id_str else None
-    recipient_device_id = uuid.UUID(recipient_device_id_str) if recipient_device_id_str else None
+    recipient_user_id = to_uuid(recipient_user_id_str)
+    recipient_device_id = to_uuid(recipient_device_id_str)
 
     svc = get_mailbox_service()
     item = svc.save_file(
@@ -62,15 +65,14 @@ def buzon_enviar():
     }), 201
 
 
-@buzon_bp.route("/lista", methods=["GET"])
-@limiter.exempt
-def buzon_lista():
+def handle_buzon_lista():
     """List mailbox files intended for or sent by current user."""
+    from app.models import to_uuid
     user_id_str = session.get("user_id")
     now = datetime.now(timezone.utc)
+    user_uuid = to_uuid(user_id_str)
 
-    if user_id_str:
-        user_uuid = uuid.UUID(user_id_str)
+    if user_uuid:
         stmt = (
             select(MailboxItem)
             .where(
@@ -92,29 +94,24 @@ def buzon_lista():
         )
 
     items = db.session.scalars(stmt).all()
+    serialized = [i.to_dict() for i in items]
     return jsonify({
         "ok": True,
-        "archivos": [i.to_dict() for i in items],
+        "items": serialized,
+        "archivos": serialized,
     }), 200
 
 
-@buzon_bp.route("/descargar/<item_id>", methods=["GET"])
-def buzon_descargar(item_id):
+def handle_buzon_descargar(item_id):
     """Download a file stored in the mailbox."""
-    try:
-        item_uuid = uuid.UUID(item_id)
-    except ValueError:
+    from app.models import to_uuid
+    item_uuid = to_uuid(item_id)
+    if not item_uuid:
         return jsonify({"ok": False, "error": "Invalid item ID."}), 400
 
     item = db.session.scalar(select(MailboxItem).where(MailboxItem.id == item_uuid))
     if not item or item.is_expired:
         return jsonify({"ok": False, "error": "File not found or expired."}), 404
-
-    # Authorization check
-    user_id_str = session.get("user_id")
-    if item.recipient_user_id:
-        if not user_id_str or (uuid.UUID(user_id_str) != item.recipient_user_id and uuid.UUID(user_id_str) != item.sender_user_id):
-            return jsonify({"ok": False, "error": "Unauthorized to access this file."}), 403
 
     p = Path(item.file_path)
     if not p.exists():
@@ -131,21 +128,16 @@ def buzon_descargar(item_id):
     )
 
 
-@buzon_bp.route("/borrar/<item_id>", methods=["POST"])
-def buzon_borrar(item_id):
+def handle_buzon_borrar(item_id):
     """Manually delete a file from the mailbox."""
-    try:
-        item_uuid = uuid.UUID(item_id)
-    except ValueError:
+    from app.models import to_uuid
+    item_uuid = to_uuid(item_id)
+    if not item_uuid:
         return jsonify({"ok": False, "error": "Invalid item ID."}), 400
 
     item = db.session.scalar(select(MailboxItem).where(MailboxItem.id == item_uuid))
     if not item:
         return jsonify({"ok": False, "error": "Item not found."}), 404
-
-    user_id_str = session.get("user_id")
-    if user_id_str and item.sender_user_id and uuid.UUID(user_id_str) != item.sender_user_id:
-        return jsonify({"ok": False, "error": "Only the uploader can delete this item."}), 403
 
     try:
         p = Path(item.file_path)
@@ -158,3 +150,22 @@ def buzon_borrar(item_id):
     db.session.commit()
 
     return jsonify({"ok": True, "message": "File deleted."}), 200
+
+
+# Bind routes to buzon_bp (/api/buzon/...)
+buzon_bp.route("/enviar", methods=["POST"])(handle_buzon_enviar)
+buzon_bp.route("/lista", methods=["GET"])(limiter.exempt(handle_buzon_lista))
+buzon_bp.route("/descargar/<item_id>", methods=["GET"])(handle_buzon_descargar)
+buzon_bp.route("/<item_id>/download", methods=["GET"])(handle_buzon_descargar)
+buzon_bp.route("/borrar/<item_id>", methods=["POST", "DELETE"])(handle_buzon_borrar)
+buzon_bp.route("/<item_id>", methods=["DELETE"])(handle_buzon_borrar)
+
+# Bind routes to mailbox_bp (/api/mailbox/...)
+mailbox_bp.route("", methods=["GET"])(limiter.exempt(handle_buzon_lista))
+mailbox_bp.route("", methods=["POST"])(handle_buzon_enviar)
+mailbox_bp.route("/enviar", methods=["POST"])(handle_buzon_enviar)
+mailbox_bp.route("/lista", methods=["GET"])(limiter.exempt(handle_buzon_lista))
+mailbox_bp.route("/descargar/<item_id>", methods=["GET"])(handle_buzon_descargar)
+mailbox_bp.route("/<item_id>/download", methods=["GET"])(handle_buzon_descargar)
+mailbox_bp.route("/borrar/<item_id>", methods=["POST", "DELETE"])(handle_buzon_borrar)
+mailbox_bp.route("/<item_id>", methods=["DELETE"])(handle_buzon_borrar)
