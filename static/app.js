@@ -343,19 +343,28 @@
       }
     });
 
-    // Eventos de Transferencia P2P
+    // Eventos de Transferencia P2P (compatibilidad bidireccional)
     socket.on("send_offer", handleIncomingOffer);
+    socket.on("file_offer", handleIncomingOffer);
+
     socket.on("file_response", handleFileResponse);
-    socket.on("file_chunk", (chunk) => {
+    socket.on("file_response_relay", handleFileResponse);
+
+    const chunkHandler = (chunk) => {
       if (typeof window.handleIncomingChunk === "function") {
         window.handleIncomingChunk(socket, chunk);
       }
-    });
-    socket.on("chunk_ack", (ack) => {
+    };
+    socket.on("file_chunk", chunkHandler);
+    socket.on("file_chunk_relay", chunkHandler);
+
+    const ackHandler = (ack) => {
       if (typeof window.handleAckReceived === "function") {
         window.handleAckReceived(socket, ack);
       }
-    });
+    };
+    socket.on("chunk_ack", ackHandler);
+    socket.on("chunk_ack_relay", ackHandler);
 
     // Portapapeles compartido
     socket.on("clipboard_update", (data) => {
@@ -416,10 +425,14 @@
     const info = document.getElementById("offer-file-info");
     const previewBox = document.getElementById("offer-preview-box");
 
-    desc.textContent = `${offer.sender_device_name || "Un dispositivo"} te ofrece un archivo:`;
+    const senderName = offer.sender_device_name || offer._from_device_name || "Un dispositivo";
+    const fileName = offer.file_name || offer.filename || "archivo";
+    const fileSize = offer.file_size || offer.size || 0;
+
+    desc.textContent = `${senderName} te ofrece un archivo:`;
     info.innerHTML = `
-      <strong>${escapeHtml(offer.file_name)}</strong>
-      <span>${formatBytes(offer.file_size)}</span>
+      <strong>${escapeHtml(fileName)}</strong>
+      <span>${formatBytes(fileSize)}</span>
     `;
 
     if (offer.preview && previewBox) {
@@ -443,22 +456,38 @@
       const offer = pendingOffer;
       pendingOffer = null;
 
+      const fileId = offer.transfer_id || offer.file_id;
+      const fileName = offer.file_name || offer.filename || "archivo";
+      const fileSize = offer.file_size || offer.size || 0;
+      const fileType = offer.file_type || offer.mimetype || "application/octet-stream";
+      const fromDevId = offer.from_device_id || offer._from_device_id;
+      const totalChunks = Math.ceil(fileSize / (64 * 1024)) || 1;
+
       // Registrar fila de transferencia entrante
-      const rowId = addTransferRow(offer.file_name, offer.file_size, "down");
+      const rowId = addTransferRow(fileName, fileSize, "down");
       if (typeof window.prepareIncoming === "function") {
-        window.prepareIncoming(offer.transfer_id || offer.file_id, {
-          filename: offer.file_name,
-          filesize: offer.file_size,
-          mimetype: offer.file_type || "application/octet-stream",
-          fromDeviceId: offer.from_device_id,
-          onProgress: (p) => updateTransferProgress(rowId, p),
-          onComplete: () => finishTransferRow(rowId, true),
+        window.prepareIncoming(fileId, {
+          filename: fileName,
+          size: fileSize,
+          mimetype: fileType,
+          totalChunks: totalChunks,
+          fromDeviceId: fromDevId,
+          onProgress: (pct) => updateTransferProgress(rowId, pct / 100),
+          onComplete: (blob, downloadFilename) => {
+            finishTransferRow(rowId, true);
+            if (typeof window.triggerBrowserDownload === "function") {
+              window.triggerBrowserDownload(blob, downloadFilename || fileName);
+            }
+            toast(`📥 Descarga completada: ${downloadFilename || fileName}`);
+          },
         });
       }
 
       socket.emit("file_response", {
-        to_device_id: offer.from_device_id,
-        transfer_id: offer.transfer_id || offer.file_id,
+        target_device_id: fromDevId,
+        to_device_id: fromDevId,
+        file_id: fileId,
+        transfer_id: fileId,
         accept: true,
       });
     };
@@ -466,9 +495,13 @@
     btnReject.onclick = () => {
       if (!pendingOffer) return;
       modal.style.display = "none";
+      const fromDevId = pendingOffer.from_device_id || pendingOffer._from_device_id;
+      const fileId = pendingOffer.transfer_id || pendingOffer.file_id;
       socket.emit("file_response", {
-        to_device_id: pendingOffer.from_device_id,
-        transfer_id: pendingOffer.transfer_id || pendingOffer.file_id,
+        target_device_id: fromDevId,
+        to_device_id: fromDevId,
+        file_id: fileId,
+        transfer_id: fileId,
         accept: false,
       });
       pendingOffer = null;
@@ -477,10 +510,11 @@
   }
 
   function handleFileResponse(resp) {
+    const fileId = resp.file_id || resp.transfer_id;
     if (resp.accept) {
       toast("El destinatario aceptó el archivo. Iniciando envío...");
       if (typeof window.startSendingAfterAccept === "function") {
-        window.startSendingAfterAccept(socket, resp.transfer_id || resp.file_id);
+        window.startSendingAfterAccept(socket, fileId);
       }
     } else {
       toast("El destinatario rechazó la transferencia.", true);
@@ -547,26 +581,38 @@
   }
 
   async function sendFilesP2P(filesList) {
-    if (devices.length === 0) {
+    const otherDevs = devices.filter((d) => d.device_id !== myDeviceId);
+    if (otherDevs.length === 0) {
       toast("No hay otros dispositivos conectados.", true);
       return;
     }
 
     const items = typeof window.filesToItems === "function" ? window.filesToItems(filesList) : Array.from(filesList).map((f) => ({ file: f, relativePath: f.name }));
     const bundle = typeof window.packageForSending === "function" ? await window.packageForSending(items) : { file: items[0].file, isBundle: false, count: 1 };
-    const targets = selectedDeviceId === GLOBAL_TARGET_ID ? devices.map((d) => d.device_id) : [selectedDeviceId];
 
-    targets.forEach((targetDevId) => {
+    const activeTargets = (selectedDeviceId === GLOBAL_TARGET_ID
+      ? otherDevs.filter((d) => d.is_online)
+      : otherDevs.filter((d) => d.device_id === selectedDeviceId)
+    ).map((d) => d.device_id);
+
+    if (activeTargets.length === 0) {
+      toast("El dispositivo seleccionado no está disponible en línea para transferencia directa.", true);
+      return;
+    }
+
+    activeTargets.forEach((targetDevId) => {
       const rowId = addTransferRow(bundle.file.name, bundle.file.size, "up");
       if (typeof window.offerFile === "function") {
         window.offerFile(socket, bundle.file, {
           targetDeviceId: targetDevId,
           isBundle: bundle.isBundle,
           bundleCount: bundle.count,
-          onProgress: (p) => updateTransferProgress(rowId, p),
+          onProgress: (p) => updateTransferProgress(rowId, p / 100),
           onDone: () => finishTransferRow(rowId, true),
           onRejected: () => finishTransferRow(rowId, false),
         });
+      } else {
+        toast("Error interno: módulo de transferencia P2P no disponible.", true);
       }
     });
   }

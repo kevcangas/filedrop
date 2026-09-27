@@ -269,7 +269,9 @@ function sendNextChunk(socket, fileId) {
   reader.onload = () => {
     const payload = {
       file_id: fileId,
+      transfer_id: fileId,
       target_device_id: tx.targetDeviceId,
+      to_device_id: tx.targetDeviceId,
       chunk_index: tx.chunkIndex,
       total_chunks: tx.totalChunks,
       data: arrayBufferToBase64(reader.result),
@@ -344,7 +346,13 @@ function handleIncomingChunk(socket, data) {
 function emitAckFor(socket, rx, fileId, chunkIndex) {
   // La confirmacion vuelve al dispositivo que nos mando el archivo.
   if (!rx.fromDeviceId) return;
-  socket.emit("chunk_ack", { file_id: fileId, target_device_id: rx.fromDeviceId, chunk_index: chunkIndex });
+  socket.emit("chunk_ack", {
+    file_id: fileId,
+    transfer_id: fileId,
+    target_device_id: rx.fromDeviceId,
+    to_device_id: rx.fromDeviceId,
+    chunk_index: chunkIndex,
+  });
 }
 
 /* =========================================================================
@@ -994,6 +1002,19 @@ function refreshS3FilesList(options = {}) {
 
 // Exportar explícitamente a window para compatibilidad global
 if (typeof window !== "undefined") {
+  window.offerFile = offerFile;
+  window.sendNextChunk = sendNextChunk;
+  window.startSendingAfterAccept = startSendingAfterAccept;
+  window.handleAckReceived = handleAckReceived;
+  window.prepareIncoming = prepareIncoming;
+  window.handleIncomingChunk = handleIncomingChunk;
+  window.triggerBrowserDownload = triggerBrowserDownload;
+  window.filesToItems = filesToItems;
+  window.packageForSending = packageForSending;
+  window.resumeActiveTransfers = resumeActiveTransfers;
+  window.hasActiveTransfers = hasActiveTransfers;
+  window.readSystemClipboard = readSystemClipboard;
+  window.writeSystemClipboard = writeSystemClipboard;
   window.uploadToS3 = uploadToS3;
   window.uploadToBuzon = uploadToBuzon;
   window.loadS3Explorer = loadS3Explorer;
