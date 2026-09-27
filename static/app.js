@@ -424,10 +424,16 @@
   }
 
   // --- Ofertas Entrantes y Modal de Aceptación ---------------------------------
+  const handledIncomingOffers = new Set();
   function handleIncomingOffer(offer) {
     console.log("[P2P] Received offer on socket:", offer);
     const fileId = offer.transfer_id || offer.file_id;
     if (!fileId) return;
+    if (handledIncomingOffers.has(fileId)) {
+      console.log("[P2P] Offer already handled, skipping duplicate:", fileId);
+      return;
+    }
+    handledIncomingOffers.add(fileId);
 
     const isOwn = Boolean(offer.auto_accept || offer.is_own_account);
     const fileName = offer.file_name || offer.filename || "archivo";
@@ -630,6 +636,12 @@
   }
 
   async function sendFilesP2P(filesList) {
+    if (!socket || !socket.connected) {
+      toast("Reconectando comunicación en tiempo real…", true);
+      if (socket) socket.connect();
+      return;
+    }
+
     const otherDevs = devices.filter((d) => d.device_id !== myDeviceId);
     if (otherDevs.length === 0) {
       toast("No hay otros dispositivos conectados.", true);

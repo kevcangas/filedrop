@@ -327,8 +327,9 @@ function handleAckReceived(socket, data) {
  * ====================================================================== */
 
 /** Registra una transferencia entrante pendiente de recibir fragmentos. */
-function prepareIncoming(fileId, { filename, size, mimetype, totalChunks, fromDeviceId, onProgress, onComplete }) {
+function prepareIncoming(fileId, { filename, size, mimetype, totalChunks, fromDeviceId, onProgress, onComplete, onDone }) {
   console.log("[P2P] prepareIncoming registered for fileId:", fileId, "chunks:", totalChunks, "from:", fromDeviceId);
+  const completeCb = onComplete || onDone;
   incoming[fileId] = {
     chunks: new Array(totalChunks),
     received: 0,
@@ -338,7 +339,8 @@ function prepareIncoming(fileId, { filename, size, mimetype, totalChunks, fromDe
     size,
     fromDeviceId: fromDeviceId || null,
     onProgress,
-    onComplete,
+    onComplete: completeCb,
+    onDone: completeCb,
   };
 }
 
@@ -1036,6 +1038,7 @@ if (typeof window !== "undefined") {
   window.prepareIncoming = prepareIncoming;
   window.handleIncomingChunk = handleIncomingChunk;
   window.triggerBrowserDownload = triggerBrowserDownload;
+  window.triggerDownload = triggerBrowserDownload;
   window.filesToItems = filesToItems;
   window.packageForSending = packageForSending;
   window.resumeActiveTransfers = resumeActiveTransfers;

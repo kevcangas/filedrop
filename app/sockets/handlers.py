@@ -249,7 +249,6 @@ def register_socket_handlers(sio):
         })
 
         emit("file_offer", payload, to=target_sid)
-        emit("send_offer", payload, to=target_sid)
 
     @sio.on("file_response")
     def handle_file_response(data):
@@ -258,7 +257,6 @@ def register_socket_handlers(sio):
         target_sid = presence_service.get_sid_for_device(target_device_id, exclude_sid=request.sid)
         print(f"[SocketIO] file_response: to={target_device_id} target_sid={target_sid} accept={data.get('accept')}", flush=True)
         if target_sid:
-            emit("file_response_relay", data, to=target_sid)
             emit("file_response", data, to=target_sid)
 
     @sio.on("file_chunk")
@@ -272,7 +270,6 @@ def register_socket_handlers(sio):
         payload = dict(data)
         payload["_from_device_id"] = str(sender_dev_id)
         payload["from_device_id"] = str(sender_dev_id)
-        emit("file_chunk_relay", payload, to=target_sid)
         emit("file_chunk", payload, to=target_sid)
 
     @sio.on("chunk_ack")
@@ -281,7 +278,6 @@ def register_socket_handlers(sio):
         target_device_id = data.get("target_device_id") or data.get("to_device_id")
         target_sid = presence_service.get_sid_for_device(target_device_id, exclude_sid=request.sid)
         if target_sid:
-            emit("chunk_ack_relay", data, to=target_sid)
             emit("chunk_ack", data, to=target_sid)
 
     @sio.on("clipboard_update")
