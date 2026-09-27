@@ -67,7 +67,7 @@ def list_devices():
 
     db_sess = get_db()
     devices = db_sess.scalars(
-        select(Device).where(Device.user_id == current_user.id, Device.is_active == True).order_by(Device.last_seen_at.desc())
+        select(Device).where(Device.user_id == current_user.id).order_by(Device.is_active.desc(), Device.last_seen_at.desc())
     ).all()
 
     current_device_id = session.get("device_id")

@@ -43,6 +43,7 @@
   }
 
   let myUserId = (window.__FILEDROP_USER__ && window.__FILEDROP_USER__.id) || "";
+  window.myUserId = myUserId;
   let myDeviceName = (window.__FILEDROP_DEVICE__ && window.__FILEDROP_DEVICE__.device_name) || localStorage.getItem("enlace_device_name") || (isMobileClient ? "Celular" : "PC");
 
   let selectedDeviceId = GLOBAL_TARGET_ID;
@@ -108,7 +109,7 @@
 
         // Acciones específicas al activar pestañas
         if (targetTab === "s3" && typeof window.loadS3Explorer === "function") {
-          window.loadS3Explorer();
+          window.loadS3Explorer({ getUserId: () => myUserId, toast: toast });
         } else if (targetTab === "buzon") {
           refreshBuzon();
         } else if (targetTab === "friends" && typeof window.loadFriendsList === "function") {
@@ -702,6 +703,7 @@
           await new Promise((resolve, reject) => {
             window.uploadToS3(file, {
               userId: myUserId,
+              folder: typeof window.s3CurrentFolder !== "undefined" ? window.s3CurrentFolder : (typeof s3CurrentFolder !== "undefined" ? s3CurrentFolder : ""),
               onProgress: (p) => updateTransferProgress(rowId, p),
               onDone: (res) => resolve(res),
               onError: (status, err) => reject(new Error(err || `HTTP ${status}`)),
@@ -1074,7 +1076,7 @@
 
     // Inicializar explorador S3 si está disponible en transfer.js
     if (typeof window.setupS3ExplorerEvents === "function") {
-      window.setupS3ExplorerEvents();
+      window.setupS3ExplorerEvents({ getUserId: () => myUserId, toast: toast });
     }
   });
 })();

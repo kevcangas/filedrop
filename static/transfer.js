@@ -537,12 +537,14 @@ function formatExpiry(expiresAtSeconds) {
  * Sube un archivo directamente a S3 dentro del prefijo y subcarpeta del usuario.
  * Devuelve el objeto XMLHttpRequest por si se necesita cancelar la subida.
  */
-function uploadToS3(file, { folder, userId, isBundle, bundleCount, onProgress, onDone, onError }) {
+function uploadToS3(file, { folder, userId, isBundle, bundleCount, onProgress, onDone, onError } = {}) {
   const xhr = new XMLHttpRequest();
   const form = new FormData();
   form.append("file", file, file.name);
-  if (folder) form.append("folder", folder);
-  if (userId) form.append("user_id", userId);
+  const targetFolder = (typeof folder === "string" ? folder : (typeof s3CurrentFolder !== "undefined" ? s3CurrentFolder : "")).trim();
+  if (targetFolder) form.append("folder", targetFolder);
+  const targetUserId = userId || (typeof myUserId !== "undefined" && myUserId ? myUserId : (typeof window !== "undefined" && window.myUserId ? window.myUserId : ""));
+  if (targetUserId) form.append("user_id", targetUserId);
   if (isBundle) {
     form.append("is_bundle", "1");
     form.append("bundle_count", String(bundleCount || 1));
@@ -598,11 +600,13 @@ async function fetchS3Files(folder, userId) {
 
 /** Crea una subcarpeta virtual en S3. */
 async function createS3Folder(folderPath, userId) {
+  const clean = (folderPath || "").toString().trim();
+  if (!clean) return { ok: false, error: "El nombre de la carpeta es requerido." };
   try {
     const res = await fetch("/api/s3/folders/create", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: folderPath, user_id: userId }),
+      body: JSON.stringify({ path: clean, user_id: userId }),
     });
     return await res.json();
   } catch (err) {
@@ -612,11 +616,13 @@ async function createS3Folder(folderPath, userId) {
 
 /** Elimina una subcarpeta virtual y su contenido en S3. */
 async function deleteS3Folder(folderPath, userId) {
+  const clean = (folderPath || "").toString().trim();
+  if (!clean) return { ok: false, error: "La ruta de la carpeta es requerida." };
   try {
     const res = await fetch("/api/s3/folders/delete", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: folderPath, user_id: userId }),
+      body: JSON.stringify({ path: clean, user_id: userId }),
     });
     return await res.json();
   } catch (err) {
@@ -675,7 +681,12 @@ let s3CachedFolders = [];
 let s3CurrentStatus = null;
 
 async function loadS3Explorer(options = {}) {
-  const getUserId = options.getUserId || (typeof getDeviceId === "function" ? getDeviceId : () => "default_user");
+  const getUserId = options.getUserId || (() => {
+    if (typeof myUserId !== "undefined" && myUserId) return myUserId;
+    if (typeof window !== "undefined" && window.myUserId) return window.myUserId;
+    if (typeof getDeviceId === "function") return getDeviceId();
+    return "default_user";
+  });
 
   const userId = getUserId();
   const breadcrumbsEl = document.getElementById("s3-breadcrumbs");
@@ -748,6 +759,7 @@ function renderS3Breadcrumbs(container, options = {}) {
   rootCrumb.onclick = () => {
     if (s3CurrentFolder !== "") {
       s3CurrentFolder = "";
+      if (typeof window !== "undefined") window.s3CurrentFolder = "";
       updateActiveTargetFolder();
       loadS3Explorer(options);
     }
@@ -756,11 +768,11 @@ function renderS3Breadcrumbs(container, options = {}) {
 
   if (!s3CurrentFolder) return;
 
-  const parts = s3CurrentFolder.replace(/\/$/, "").split("/");
+  const parts = s3CurrentFolder.replace(/\/+$/, "").split("/").filter(Boolean);
   let accumulated = "";
 
   parts.forEach((part, idx) => {
-    accumulated += part + "/";
+    accumulated += (accumulated ? "/" : "") + part;
     const currentAcc = accumulated;
 
     const sep = document.createElement("span");
@@ -775,6 +787,7 @@ function renderS3Breadcrumbs(container, options = {}) {
     if (!isLast) {
       crumb.onclick = () => {
         s3CurrentFolder = currentAcc;
+        if (typeof window !== "undefined") window.s3CurrentFolder = s3CurrentFolder;
         updateActiveTargetFolder();
         loadS3Explorer(options);
       };
@@ -787,6 +800,9 @@ function updateActiveTargetFolder() {
   if (typeof currentS3Folder !== "undefined") {
     currentS3Folder = s3CurrentFolder;
   }
+  if (typeof window !== "undefined") {
+    window.s3CurrentFolder = s3CurrentFolder;
+  }
   const folderEl = document.getElementById("s3-current-target-folder");
   if (folderEl) {
     folderEl.textContent = s3CurrentFolder ? `/${s3CurrentFolder}` : "(raíz)";
@@ -797,19 +813,35 @@ function renderS3Content(filterQuery = "", options = {}) {
   const foldersContainer = document.getElementById("s3-folders-container");
   const foldersListEl = document.getElementById("s3-folders-list");
   const filesListEl = document.getElementById("s3-files-list");
-  const getUserId = options.getUserId || (typeof getDeviceId === "function" ? getDeviceId : () => "default_user");
+  const getUserId = options.getUserId || (() => {
+    if (typeof myUserId !== "undefined" && myUserId) return myUserId;
+    if (typeof window !== "undefined" && window.myUserId) return window.myUserId;
+    if (typeof getDeviceId === "function") return getDeviceId();
+    return "default_user";
+  });
   const userId = getUserId();
   const showToast = options.toast || (typeof toast === "function" ? toast : console.log);
 
   const q = (filterQuery || "").trim().toLowerCase();
 
-  // Carpetas
-  const filteredFolders = s3CachedFolders.filter(f => !q || f.name.toLowerCase().includes(q));
+  // Carpetas normalizadas (soporta array de strings o array de objetos)
+  const normalizedFolders = (s3CachedFolders || []).map((f) => {
+    if (typeof f === "string") {
+      const name = f.replace(/\/+$/, "");
+      const path = s3CurrentFolder ? `${s3CurrentFolder.replace(/\/+$/, "")}/${name}` : name;
+      return { name, path };
+    }
+    const name = f.name || f.path || "";
+    const path = f.path || (s3CurrentFolder ? `${s3CurrentFolder.replace(/\/+$/, "")}/${name}` : name);
+    return { ...f, name, path };
+  });
+
+  const filteredFolders = normalizedFolders.filter((f) => !q || (f.name && f.name.toLowerCase().includes(q)));
   if (foldersContainer && foldersListEl) {
     if (filteredFolders.length > 0) {
       foldersContainer.style.display = "";
       foldersListEl.innerHTML = "";
-      filteredFolders.forEach(folder => {
+      filteredFolders.forEach((folder) => {
         const card = document.createElement("div");
         card.className = "s3-folder-card";
         card.innerHTML = `
@@ -820,16 +852,22 @@ function renderS3Content(filterQuery = "", options = {}) {
           <button class="danger s3-action-btn btn-delete-folder" title="Eliminar carpeta" style="padding:2px 6px;">✕</button>
         `;
         card.onclick = (e) => {
-          if (e.target.classList.contains("btn-delete-folder")) return;
+          if (e.target.closest(".btn-delete-folder")) return;
           s3CurrentFolder = folder.path;
+          if (typeof window !== "undefined") window.s3CurrentFolder = s3CurrentFolder;
           updateActiveTargetFolder();
           loadS3Explorer(options);
         };
         const delBtn = card.querySelector(".btn-delete-folder");
         delBtn.onclick = async (e) => {
           e.stopPropagation();
+          const targetPath = (folder.path || folder.name || "").trim();
+          if (!targetPath) {
+            showToast("Ruta de carpeta no válida.", true);
+            return;
+          }
           if (!confirm(`¿Eliminar la carpeta "${folder.name}" y todos los archivos dentro de ella en S3?`)) return;
-          const res = await deleteS3Folder(folder.path, userId);
+          const res = await deleteS3Folder(targetPath, userId);
           if (res.ok) {
             showToast(`Carpeta "${folder.name}" eliminada.`);
             loadS3Explorer(options);
@@ -844,8 +882,17 @@ function renderS3Content(filterQuery = "", options = {}) {
     }
   }
 
-  // Archivos
-  const filteredFiles = s3CachedFiles.filter(f => !q || f.name.toLowerCase().includes(q));
+  // Archivos normalizados
+  const normalizedFiles = (s3CachedFiles || []).map((f) => {
+    const name = f.name || f.filename || (f.key ? f.key.split("/").pop() : "archivo");
+    return {
+      ...f,
+      name: name,
+      filename: f.filename || name,
+    };
+  });
+
+  const filteredFiles = normalizedFiles.filter((f) => !q || (f.name && f.name.toLowerCase().includes(q)));
   if (filesListEl) {
     filesListEl.innerHTML = "";
     if (filteredFiles.length === 0) {
@@ -855,10 +902,11 @@ function renderS3Content(filterQuery = "", options = {}) {
       return;
     }
 
-    filteredFiles.forEach(file => {
+    filteredFiles.forEach((file) => {
       const row = document.createElement("div");
       row.className = "s3-file-row";
-      const icon = getFileCategoryIcon(file.name, file.mimetype);
+      const fileName = file.name || file.filename || "archivo";
+      const icon = getFileCategoryIcon(fileName, file.mimetype || file.content_type);
       const dateStr = file.last_modified ? new Date(file.last_modified).toLocaleDateString(undefined, {
         month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"
       }) : "";
@@ -867,13 +915,13 @@ function renderS3Content(filterQuery = "", options = {}) {
         <div class="s3-file-main">
           <div class="s3-file-icon">${icon}</div>
           <div class="s3-file-details">
-            <div class="s3-file-name" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</div>
+            <div class="s3-file-name" title="${escapeHtml(fileName)}">${escapeHtml(fileName)}</div>
             <div class="s3-file-meta">${formatBytes(file.size)} ${dateStr ? '· ' + dateStr : ''}</div>
           </div>
         </div>
         <div class="s3-actions">
           <button class="s3-action-btn btn-s3-preview" title="Vista previa">👁️ Ver</button>
-          <a href="/api/s3/download/${encodeURIComponent(file.key)}?stream=1" download="${escapeHtml(file.name)}" class="s3-action-btn button" style="text-decoration:none; display:inline-flex; align-items:center;" title="Descargar">📥</a>
+          <a href="/api/s3/download/${encodeURIComponent(file.key)}?stream=1" download="${escapeHtml(fileName)}" class="s3-action-btn button" style="text-decoration:none; display:inline-flex; align-items:center;" title="Descargar">📥</a>
           <button class="s3-action-btn btn-s3-share" title="Copiar enlace prefirmado">🔗</button>
           <button class="danger s3-action-btn btn-s3-del" title="Eliminar de S3">🗑️</button>
         </div>
@@ -896,10 +944,10 @@ function renderS3Content(filterQuery = "", options = {}) {
       };
 
       row.querySelector(".btn-s3-del").onclick = async () => {
-        if (!confirm(`¿Eliminar "${file.name}" permanentemente de S3?`)) return;
+        if (!confirm(`¿Eliminar "${fileName}" permanentemente de S3?`)) return;
         const delRes = await deleteS3File(file.key, userId);
         if (delRes.ok) {
-          showToast(`Archivo "${file.name}" eliminado de S3.`);
+          showToast(`Archivo "${fileName}" eliminado de S3.`);
           loadS3Explorer(options);
         } else {
           showToast(delRes.error || "No se pudo eliminar el archivo.", true);
@@ -923,8 +971,9 @@ async function openS3Preview(file, userId) {
 
   if (!modal) return;
 
-  titleEl.textContent = file.name;
-  metaEl.textContent = `${formatBytes(file.size)} · ${file.mimetype || "desconocido"}`;
+  const fileName = file.name || file.filename || "archivo";
+  titleEl.textContent = fileName;
+  metaEl.textContent = `${formatBytes(file.size)} · ${file.mimetype || file.content_type || "desconocido"}`;
   bodyEl.innerHTML = '<p class="empty-hint">Cargando vista previa...</p>';
   modal.style.display = "flex";
 
@@ -947,14 +996,14 @@ async function openS3Preview(file, userId) {
   closeBtn.onclick = () => { modal.style.display = "none"; };
   modal.onclick = (e) => { if (e.target === modal) modal.style.display = "none"; };
 
-  const mime = (file.mimetype || "").toLowerCase();
-  const ext = (file.name.split(".").pop() || "").toLowerCase();
+  const mime = (file.mimetype || file.content_type || "").toLowerCase();
+  const ext = (fileName.split(".").pop() || "").toLowerCase();
   const streamUrl = `/api/s3/download/${encodeURIComponent(file.key)}?stream=1`;
 
   if (mime.startsWith("image/") || ["jpg", "jpeg", "png", "gif", "webp", "svg"].includes(ext)) {
     const img = document.createElement("img");
     img.src = streamUrl;
-    img.alt = file.name;
+    img.alt = fileName;
     img.onload = () => { bodyEl.innerHTML = ""; bodyEl.appendChild(img); };
     img.onerror = () => { bodyEl.innerHTML = '<p class="empty-hint">No se pudo cargar la imagen.</p>'; };
   } else if (mime.startsWith("video/") || ["mp4", "webm"].includes(ext)) {
@@ -986,7 +1035,12 @@ async function openS3Preview(file, userId) {
 }
 
 function setupS3ExplorerEvents(options = {}) {
-  const getUserId = options.getUserId || (typeof getDeviceId === "function" ? getDeviceId : () => "default_user");
+  const getUserId = options.getUserId || (() => {
+    if (typeof myUserId !== "undefined" && myUserId) return myUserId;
+    if (typeof window !== "undefined" && window.myUserId) return window.myUserId;
+    if (typeof getDeviceId === "function") return getDeviceId();
+    return "default_user";
+  });
   const showToast = options.toast || (typeof toast === "function" ? toast : console.log);
 
   const searchInput = document.getElementById("s3-search-input");
@@ -1011,7 +1065,8 @@ function setupS3ExplorerEvents(options = {}) {
       const name = prompt("Nombre de la nueva carpeta:");
       if (!name || !name.trim()) return;
       const cleanName = name.trim().replace(/[\/\\]/g, "");
-      const fullPath = (s3CurrentFolder ? s3CurrentFolder : "") + cleanName;
+      if (!cleanName) return;
+      const fullPath = s3CurrentFolder ? `${s3CurrentFolder.replace(/\/+$/, "")}/${cleanName}` : cleanName;
       const res = await createS3Folder(fullPath, getUserId());
       if (res.ok) {
         showToast(`Carpeta "${cleanName}" creada.`);
@@ -1055,6 +1110,13 @@ if (typeof window !== "undefined") {
   window.deleteS3Folder = deleteS3Folder;
   window.deleteS3File = deleteS3File;
   window.itemsFromDataTransfer = itemsFromDataTransfer;
+  window.getS3CurrentFolder = () => s3CurrentFolder;
+  window.setS3CurrentFolder = (f) => { s3CurrentFolder = f; };
+  Object.defineProperty(window, "s3CurrentFolder", {
+    get: () => s3CurrentFolder,
+    set: (v) => { s3CurrentFolder = v; },
+    configurable: true,
+  });
 }
 
 

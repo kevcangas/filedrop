@@ -56,7 +56,54 @@ def test_s3_upload_and_list_mocked(client, sample_user):
         assert res_folder.status_code == 201
         assert res_folder.get_json()["ok"] is True
 
-        # 3. Test Delete
+        # 3. Test Folders Delete
+        mock_client.get_paginator.return_value.paginate.return_value = [
+            {"Contents": [{"Key": f"users/{sample_user.id}/projects/"}]}
+        ]
+        res_folder_del = client.post(
+            "/api/s3/folders/delete",
+            data=json.dumps({"path": "projects"}),
+            content_type="application/json",
+        )
+        assert res_folder_del.status_code == 200
+        assert res_folder_del.get_json()["ok"] is True
+
+        # 4. Test Files List
+        mock_client.get_paginator.return_value.paginate.return_value = [
+            {
+                "CommonPrefixes": [{"Prefix": f"users/{sample_user.id}/docs/"}],
+                "Contents": [
+                    {
+                        "Key": f"users/{sample_user.id}/sample_test.txt",
+                        "Size": 1234,
+                        "LastModified": MagicMock(isoformat=lambda: "2026-09-26T22:00:00Z"),
+                    }
+                ],
+            }
+        ]
+        res_list = client.get("/api/s3/files")
+        assert res_list.status_code == 200
+        list_data = res_list.get_json()
+        assert list_data["ok"] is True
+        assert len(list_data["folders"]) == 1
+        assert list_data["folders"][0]["name"] == "docs"
+        assert list_data["folders"][0]["path"] == "docs"
+        assert len(list_data["files"]) == 1
+        assert list_data["files"][0]["filename"] == "sample_test.txt"
+
+        # 5. Test Download Stream
+        mock_body = MagicMock()
+        mock_body.read.side_effect = [b"stream chunk", b""]
+        mock_client.get_object.return_value = {
+            "Body": mock_body,
+            "ContentType": "text/plain",
+            "ContentLength": 12,
+        }
+        res_dl = client.get(f"/api/s3/download/users/{sample_user.id}/sample_test.txt?stream=1")
+        assert res_dl.status_code == 200
+        assert b"stream chunk" in res_dl.data
+
+        # 6. Test Delete File
         res_del = client.post(
             "/api/s3/delete",
             data=json.dumps({"key": f"users/{sample_user.id}/sample_test.txt"}),

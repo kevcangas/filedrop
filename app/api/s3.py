@@ -2,7 +2,8 @@
 S3 Storage REST API Blueprint for multi-tenant cloud storage operations.
 """
 
-from flask import Blueprint, current_app, jsonify, redirect, request, session
+from flask import Blueprint, current_app, jsonify, redirect, request, session, Response, stream_with_context
+import mimetypes
 from app.services import S3Service
 from app.extensions import limiter
 
@@ -30,6 +31,7 @@ def s3_status():
     svc = get_s3_service()
     enabled = svc.is_enabled()
     configured = False
+    connected = False
     error = None
 
     if enabled:
@@ -37,16 +39,19 @@ def s3_status():
             client = svc.get_client()
             if client:
                 configured = True
+                client.head_bucket(Bucket=svc.bucket_name)
+                connected = True
         except Exception as ex:
             error = str(ex)
 
+    effective_user = request.args.get("user_id") or get_effective_user_id()
     return jsonify({
         "ok": True,
         "enabled": enabled,
         "configured": configured,
-        "connected": configured,
-        "bucket": svc.bucket_name,
-        "user_prefix": svc.get_user_prefix(get_effective_user_id()),
+        "connected": connected,
+        "bucket": svc.bucket_name if enabled else None,
+        "user_prefix": svc.get_user_prefix(effective_user) if enabled else None,
         "error": error,
     }), 200
 
@@ -96,6 +101,8 @@ def s3_files():
             "ok": True,
             "folders": data.get("folders", []),
             "files": data.get("files", []),
+            "total_files": data.get("total_files", len(data.get("files", []))),
+            "total_size": data.get("total_size", 0),
         }), 200
     except Exception as ex:
         return jsonify({"ok": False, "folders": [], "files": [], "error": str(ex)}), 500
@@ -143,15 +150,45 @@ def s3_delete_folder():
 
 @s3_bp.route("/download/<path:key>", methods=["GET"])
 def s3_download(key):
-    """Generate and redirect to presigned S3 download URL."""
+    """Stream file directly or redirect to presigned S3 download URL."""
     svc = get_s3_service()
     if not svc.is_enabled():
         return jsonify({"ok": False, "error": "S3 is disabled."}), 400
 
     user_id = request.args.get("user_id") or get_effective_user_id()
+    stream_requested = request.args.get("stream", "1").strip().lower() in ("1", "true", "yes")
+
     try:
-        url = svc.generate_presigned_url(user_id=user_id, s3_key=key, expiry_seconds=3600)
-        return redirect(url)
+        if stream_requested:
+            s3_obj = svc.get_object(user_id=user_id, s3_key=key)
+            body = s3_obj["Body"]
+            content_type = s3_obj.get("ContentType") or mimetypes.guess_type(key)[0] or "application/octet-stream"
+            content_length = s3_obj.get("ContentLength")
+            filename = key.split("/")[-1]
+            parts = filename.split("_", 1)
+            if len(parts) == 2 and len(parts[0]) == 8 and all(c in "0123456789abcdefABCDEF" for c in parts[0]):
+                display_name = parts[1]
+            else:
+                display_name = filename
+
+            def generate():
+                while True:
+                    chunk = body.read(64 * 1024)
+                    if not chunk:
+                        break
+                    yield chunk
+
+            headers = {
+                "Content-Type": content_type,
+                "Content-Disposition": f'inline; filename="{display_name}"',
+            }
+            if content_length:
+                headers["Content-Length"] = str(content_length)
+
+            return Response(stream_with_context(generate()), headers=headers)
+        else:
+            url = svc.generate_presigned_url(user_id=user_id, s3_key=key, expiry_seconds=3600)
+            return redirect(url)
     except PermissionError as pe:
         return jsonify({"ok": False, "error": str(pe)}), 403
     except Exception as ex:

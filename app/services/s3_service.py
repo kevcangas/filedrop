@@ -163,17 +163,19 @@ class S3Service:
         """List folders and files under the user's isolated subfolder."""
         client = self.get_client()
         if not client:
-            return {"folders": [], "files": []}
+            return {"folders": [], "files": [], "total_files": 0, "total_size": 0}
 
         self.ensure_bucket_exists()
 
         prefix = self.get_user_prefix(user_id)
-        if subfolder:
-            prefix += subfolder.strip("/") + "/"
+        clean_sub = subfolder.strip("/") if subfolder else ""
+        if clean_sub:
+            prefix += clean_sub + "/"
 
         paginator = client.get_paginator("list_objects_v2")
         files = []
         folders = set()
+        total_size = 0
 
         for page in paginator.paginate(Bucket=self.bucket_name, Prefix=prefix, Delimiter="/"):
             # Subfolders (CommonPrefixes)
@@ -183,24 +185,56 @@ class S3Service:
                 if folder_name:
                     folders.add(folder_name)
 
-            # Files
+            # Files and Directory Markers
             for obj in page.get("Contents", []):
                 key = obj["Key"]
                 if key == prefix or key.endswith("/"):
-                    continue  # Directory placeholder
+                    # Check if this is a directory placeholder for a subfolder
+                    sub_marker = key[len(prefix):].strip("/")
+                    if sub_marker and "/" not in sub_marker:
+                        folders.add(sub_marker)
+                    continue
+
                 name = key[len(prefix):]
                 if "/" in name:
                     # Belongs to subfolder
                     folders.add(name.split("/")[0])
                     continue
+
+                # Strip 8-char random hex prefix if present for clean UI display
+                display_name = name
+                parts = name.split("_", 1)
+                if len(parts) == 2 and len(parts[0]) == 8 and all(c in "0123456789abcdefABCDEF" for c in parts[0]):
+                    display_name = parts[1]
+
+                mime, _ = mimetypes.guess_type(display_name)
+                mime_type = mime or "application/octet-stream"
+
                 files.append({
                     "key": key,
-                    "filename": name,
+                    "filename": display_name,
+                    "name": display_name,
                     "size": obj["Size"],
                     "last_modified": obj["LastModified"].isoformat(),
+                    "mimetype": mime_type,
+                    "content_type": mime_type,
                 })
+                total_size += obj["Size"]
 
-        return {"folders": sorted(list(folders)), "files": files}
+        folder_list = []
+        for f in sorted(list(folders)):
+            rel_path = f"{clean_sub}/{f}".strip("/") if clean_sub else f
+            folder_list.append({
+                "name": f,
+                "path": rel_path,
+            })
+
+        return {
+            "folders": folder_list,
+            "files": files,
+            "total_files": len(files),
+            "total_size": total_size,
+        }
 
     def list_files(self, user_id: str, subfolder: str = "") -> List[dict]:
         """Backward compatible list returning files list."""
@@ -240,12 +274,36 @@ class S3Service:
             for obj in page.get("Contents", []):
                 delete_keys.append({"Key": obj["Key"]})
 
+        # Also delete exact marker if created without trailing slash
+        exact_marker = f"{self.get_user_prefix(user_id)}{clean_path}"
+        seen_keys = {item["Key"] for item in delete_keys}
+        if exact_marker not in seen_keys:
+            try:
+                client.head_object(Bucket=self.bucket_name, Key=exact_marker)
+                delete_keys.append({"Key": exact_marker})
+            except Exception:
+                pass
+
         if delete_keys:
-            client.delete_objects(
-                Bucket=self.bucket_name,
-                Delete={"Objects": delete_keys},
-            )
+            # Batch delete in groups of 1000 keys (S3 limit)
+            for i in range(0, len(delete_keys), 1000):
+                batch = delete_keys[i:i + 1000]
+                client.delete_objects(
+                    Bucket=self.bucket_name,
+                    Delete={"Objects": batch},
+                )
         return True
+
+    def get_object(self, user_id: str, s3_key: str) -> dict:
+        """Fetch object stream and metadata from S3 after verifying ownership."""
+        user_prefix = self.get_user_prefix(user_id)
+        if not s3_key.startswith(user_prefix):
+            raise PermissionError("Access denied: Key does not belong to user.")
+
+        client = self.get_client()
+        if not client:
+            raise RuntimeError("S3 service is not enabled.")
+        return client.get_object(Bucket=self.bucket_name, Key=s3_key)
 
     def generate_presigned_url(self, user_id: str, s3_key: str, expiry_seconds: int = 3600) -> str:
         """Generate a presigned GET URL after verifying the key belongs to user_id."""
