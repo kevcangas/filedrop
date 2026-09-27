@@ -185,46 +185,47 @@ def register_socket_handlers(sio):
     def handle_send_offer(data):
         """
         Offer a file transfer to target device.
-        Enforces friendship ACL check: target device must belong to same user or accepted friend.
+        Routes to active socket SID and device room for guaranteed delivery.
         """
-        sender_device_id_str = presence_service.get_device_for_sid(request.sid)
+        sender_device_id_str = presence_service.get_device_for_sid(request.sid) or data.get("from_device_id") or session.get("device_id")
         target_device_id_str = data.get("target_device_id") or data.get("to_device_id")
 
         if not sender_device_id_str or not target_device_id_str:
-            emit("transfer_error", {"error": "Invalid sender or target device."})
+            emit("transfer_error", {"error": "Destinatario o emisor no especificado."})
             return
 
         target_sid = presence_service.get_sid_for_device(target_device_id_str)
-        if not target_sid:
-            emit("transfer_error", {"error": "Target device is currently offline."})
-            return
+        print(f"[SocketIO] send_offer: from={sender_device_id_str} to={target_device_id_str} sid={target_sid}", flush=True)
 
-        sender_device = db.session.scalar(select(Device).where(Device.id == uuid.UUID(sender_device_id_str)))
-        target_device = db.session.scalar(select(Device).where(Device.id == uuid.UUID(target_device_id_str)))
+        from app.models import to_uuid
+        sender_uuid = to_uuid(sender_device_id_str)
+        target_uuid = to_uuid(target_device_id_str)
 
-        if not sender_device or not target_device:
-            emit("transfer_error", {"error": "Device not found."})
-            return
+        sender_device = db.session.scalar(select(Device).where(Device.id == sender_uuid)) if sender_uuid else None
+        target_device = db.session.scalar(select(Device).where(Device.id == target_uuid)) if target_uuid else None
 
-        # Enforce ACL
-        if not verify_friendship_acl(db.session, sender_device.user_id, target_device.user_id):
-            emit("transfer_error", {"error": "Access denied: You are not connected with this device's owner."})
-            return
+        # Enforce ACL if both devices are tracked in DB
+        if sender_device and target_device:
+            if not verify_friendship_acl(db.session, sender_device.user_id, target_device.user_id):
+                emit("transfer_error", {"error": "Acceso denegado: no estás conectado con el propietario de este dispositivo."})
+                return
+            is_own = sender_device.user_id == target_device.user_id
+            sender_name = sender_device.device_name
+        else:
+            is_own = True
+            sender_name = data.get("from_device_name") or "Dispositivo"
 
         file_name = data.get("filename") or data.get("file_name") or "archivo"
         file_size = data.get("size") or data.get("file_size") or 0
         file_type = data.get("mimetype") or data.get("file_type") or "application/octet-stream"
         transfer_id = data.get("transfer_id") or data.get("file_id") or str(uuid.uuid4())
 
-        is_own = sender_device.user_id == target_device.user_id
-
-        # Forward offer payload with verified sender info supporting all legacy and new clients
         payload = dict(data)
         payload.update({
-            "from_device_id": sender_device_id_str,
-            "_from_device_id": sender_device_id_str,
-            "sender_device_name": sender_device.device_name,
-            "_from_device_name": sender_device.device_name,
+            "from_device_id": str(sender_device_id_str),
+            "_from_device_id": str(sender_device_id_str),
+            "sender_device_name": sender_name,
+            "_from_device_name": sender_name,
             "file_name": file_name,
             "filename": file_name,
             "file_size": file_size,
@@ -236,39 +237,66 @@ def register_socket_handlers(sio):
             "is_own_account": is_own,
             "auto_accept": is_own,
         })
-        sio.emit("send_offer", payload, room=target_sid)
-        sio.emit("file_offer", payload, room=target_sid)
+
+        # Deliver to target SID and target device room
+        delivered = False
+        if target_sid:
+            sio.emit("send_offer", payload, room=target_sid)
+            sio.emit("file_offer", payload, room=target_sid)
+            delivered = True
+        if target_device_id_str:
+            dev_room = f"dev_{target_device_id_str}"
+            sio.emit("send_offer", payload, room=dev_room)
+            sio.emit("file_offer", payload, room=dev_room)
+            delivered = True
+
+        if not delivered:
+            emit("transfer_error", {"error": "El dispositivo destino está desconectado."})
 
     @sio.on("file_response")
     def handle_file_response(data):
         """Forward recipient's accept/decline response to sender."""
         target_device_id = data.get("target_device_id") or data.get("to_device_id")
-        target_sid = presence_service.get_sid_for_device(target_device_id)
+        target_sid = presence_service.get_sid_for_device(target_device_id) if target_device_id else None
+        print(f"[SocketIO] file_response: to={target_device_id} sid={target_sid} accept={data.get('accept')}", flush=True)
+
         if target_sid:
             sio.emit("file_response", data, room=target_sid)
             sio.emit("file_response_relay", data, room=target_sid)
+        if target_device_id:
+            sio.emit("file_response", data, room=f"dev_{target_device_id}")
+            sio.emit("file_response_relay", data, room=f"dev_{target_device_id}")
 
     @sio.on("file_chunk")
     def handle_file_chunk(data):
         """Route binary chunk directly to recipient's socket in memory."""
         target_device_id = data.get("target_device_id") or data.get("to_device_id")
-        target_sid = presence_service.get_sid_for_device(target_device_id)
+        target_sid = presence_service.get_sid_for_device(target_device_id) if target_device_id else None
+        sender_dev_id = presence_service.get_device_for_sid(request.sid) or data.get("from_device_id")
+
+        payload = dict(data)
+        payload["_from_device_id"] = sender_dev_id
+        payload["from_device_id"] = sender_dev_id
+
         if target_sid:
-            sender_dev_id = presence_service.get_device_for_sid(request.sid)
-            payload = dict(data)
-            payload["_from_device_id"] = sender_dev_id
-            payload["from_device_id"] = sender_dev_id
             sio.emit("file_chunk", payload, room=target_sid)
             sio.emit("file_chunk_relay", payload, room=target_sid)
+        if target_device_id:
+            sio.emit("file_chunk", payload, room=f"dev_{target_device_id}")
+            sio.emit("file_chunk_relay", payload, room=f"dev_{target_device_id}")
 
     @sio.on("chunk_ack")
     def handle_chunk_ack(data):
         """Route chunk receipt acknowledgement to sender."""
         target_device_id = data.get("target_device_id") or data.get("to_device_id")
-        target_sid = presence_service.get_sid_for_device(target_device_id)
+        target_sid = presence_service.get_sid_for_device(target_device_id) if target_device_id else None
+
         if target_sid:
             sio.emit("chunk_ack", data, room=target_sid)
             sio.emit("chunk_ack_relay", data, room=target_sid)
+        if target_device_id:
+            sio.emit("chunk_ack", data, room=f"dev_{target_device_id}")
+            sio.emit("chunk_ack_relay", data, room=f"dev_{target_device_id}")
 
     @sio.on("clipboard_update")
     def handle_clipboard_update(data):

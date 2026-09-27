@@ -651,14 +651,22 @@
 
     activeTargets.forEach((targetDevId) => {
       const rowId = addTransferRow(bundle.file.name, bundle.file.size, "up");
+      console.log("[P2P] Offering file to target:", targetDevId, "file:", bundle.file.name, "size:", bundle.file.size);
+      toast(`📤 Enviando "${bundle.file.name}"…`);
       if (typeof window.offerFile === "function") {
         window.offerFile(socket, bundle.file, {
           targetDeviceId: targetDevId,
           isBundle: bundle.isBundle,
           bundleCount: bundle.count,
           onProgress: (p) => updateTransferProgress(rowId, p / 100),
-          onDone: () => finishTransferRow(rowId, true),
-          onRejected: () => finishTransferRow(rowId, false),
+          onDone: () => {
+            finishTransferRow(rowId, true);
+            toast(`✓ "${bundle.file.name}" enviado con éxito.`);
+          },
+          onRejected: () => {
+            finishTransferRow(rowId, false);
+            toast("✗ Transferencia rechazada.", true);
+          },
         });
       } else {
         toast("Error interno: módulo de transferencia P2P no disponible.", true);
