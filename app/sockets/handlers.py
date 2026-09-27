@@ -216,6 +216,8 @@ def register_socket_handlers(sio):
         file_type = data.get("mimetype") or data.get("file_type") or "application/octet-stream"
         transfer_id = data.get("transfer_id") or data.get("file_id") or str(uuid.uuid4())
 
+        is_own = sender_device.user_id == target_device.user_id
+
         # Forward offer payload with verified sender info supporting all legacy and new clients
         payload = dict(data)
         payload.update({
@@ -231,6 +233,8 @@ def register_socket_handlers(sio):
             "mimetype": file_type,
             "transfer_id": transfer_id,
             "file_id": transfer_id,
+            "is_own_account": is_own,
+            "auto_accept": is_own,
         })
         sio.emit("send_offer", payload, room=target_sid)
         sio.emit("file_offer", payload, room=target_sid)

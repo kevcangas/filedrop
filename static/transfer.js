@@ -1024,6 +1024,7 @@ if (typeof window !== "undefined") {
   window.createS3Folder = createS3Folder;
   window.deleteS3Folder = deleteS3Folder;
   window.deleteS3File = deleteS3File;
+  window.itemsFromDataTransfer = itemsFromDataTransfer;
 }
 
 

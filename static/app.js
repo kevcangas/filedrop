@@ -366,6 +366,12 @@
     socket.on("chunk_ack", ackHandler);
     socket.on("chunk_ack_relay", ackHandler);
 
+    // Notificaciones de error de transferencia
+    socket.on("transfer_error", (data) => {
+      const msg = (data && data.error) || "Error en la transferencia.";
+      toast(`⚠️ ${msg}`, true);
+    });
+
     // Portapapeles compartido
     socket.on("clipboard_update", (data) => {
       if (!data || !data.text) return;
@@ -419,15 +425,53 @@
 
   // --- Ofertas Entrantes y Modal de Aceptación ---------------------------------
   function handleIncomingOffer(offer) {
+    const isOwn = Boolean(offer.auto_accept || offer.is_own_account);
+    const fileId = offer.transfer_id || offer.file_id;
+    const fileName = offer.file_name || offer.filename || "archivo";
+    const fileSize = offer.file_size || offer.size || 0;
+    const fileType = offer.file_type || offer.mimetype || "application/octet-stream";
+    const fromDevId = offer.from_device_id || offer._from_device_id;
+    const senderName = offer.sender_device_name || offer._from_device_name || "Un dispositivo";
+
+    if (isOwn) {
+      // Auto-recepción directa entre dispositivos propios (igual de fluido que la versión original)
+      const totalChunks = Math.ceil(fileSize / (64 * 1024)) || 1;
+      const rowId = addTransferRow(fileName, fileSize, "down");
+      toast(`📥 Recibiendo "${fileName}" de ${senderName}…`);
+
+      if (typeof window.prepareIncoming === "function") {
+        window.prepareIncoming(fileId, {
+          filename: fileName,
+          size: fileSize,
+          mimetype: fileType,
+          totalChunks: totalChunks,
+          fromDeviceId: fromDevId,
+          onProgress: (pct) => updateTransferProgress(rowId, pct / 100),
+          onComplete: (blob, downloadFilename) => {
+            finishTransferRow(rowId, true);
+            if (typeof window.triggerBrowserDownload === "function") {
+              window.triggerBrowserDownload(blob, downloadFilename || fileName);
+            }
+            toast(`✓ "${downloadFilename || fileName}" recibido y guardado.`);
+          },
+        });
+      }
+
+      socket.emit("file_response", {
+        target_device_id: fromDevId,
+        to_device_id: fromDevId,
+        file_id: fileId,
+        transfer_id: fileId,
+        accept: true,
+      });
+      return;
+    }
+
     pendingOffer = offer;
     const modal = document.getElementById("offer-modal");
     const desc = document.getElementById("offer-modal-desc");
     const info = document.getElementById("offer-file-info");
     const previewBox = document.getElementById("offer-preview-box");
-
-    const senderName = offer.sender_device_name || offer._from_device_name || "Un dispositivo";
-    const fileName = offer.file_name || offer.filename || "archivo";
-    const fileSize = offer.file_size || offer.size || 0;
 
     desc.textContent = `${senderName} te ofrece un archivo:`;
     info.innerHTML = `
@@ -596,7 +640,12 @@
     ).map((d) => d.device_id);
 
     if (activeTargets.length === 0) {
-      toast("El dispositivo seleccionado no está disponible en línea para transferencia directa.", true);
+      toast("El dispositivo no tiene WebSocket activo en este momento. Cambiando a Buzón…", true);
+      const destBuzon = document.getElementById("dest-buzon");
+      if (destBuzon) {
+        destBuzon.checked = true;
+        updateTargetHint();
+      }
       return;
     }
 
