@@ -98,7 +98,8 @@ class PresenceService:
 
             # Fallback 2 (Safeguard): If only ONE other socket is currently connected to the server,
             # route to it so P2P transfers between 2 active devices never drop due to ID discrepancy.
-            other_active_sids = [s for s in self._sid_to_info.keys() if not exclude_sid or s != exclude_sid]
+            all_other_sids = set(self._sid_to_info.keys()) | set(self._device_to_sid.values())
+            other_active_sids = [s for s in all_other_sids if not exclude_sid or s != exclude_sid]
             if len(other_active_sids) == 1:
                 return other_active_sids[0]
 

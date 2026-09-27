@@ -18,28 +18,30 @@ def register_socket_handlers(sio):
 
     @sio.on("connect")
     def handle_connect():
-        user, device = verify_socket_session(db.session)
         sid = request.sid
+        user, device = verify_socket_session(db.session)
+        if not user:
+            from app.views.web import get_or_create_default_user
+            user = get_or_create_default_user()
 
-        if user and device:
-            print(f"[SocketIO] Connect: sid={sid} user={user.username} device={device.device_name} ({device.device_type}) id={device.id}", flush=True)
-            # Join user room and device room
+        print(f"[SocketIO] Connect: sid={sid} user={user.username if user else None}", flush=True)
+
+        if user:
             join_room(f"user_{user.id}")
-            join_room(f"dev_{device.id}")
-            presence_service.register_socket(
-                sid=sid,
-                user_id=str(user.id),
-                device_id=str(device.id),
-                device_meta={"device_name": device.device_name, "device_type": device.device_type.value if hasattr(device.device_type, "value") else str(device.device_type)},
-            )
-            device.mark_seen()
-            db.session.commit()
-            emit("session_ready", {"ok": True, "device_id": str(device.id), "user_id": str(user.id)})
-            _broadcast_device_updates(user.id)
-        else:
-            print(f"[SocketIO] Connect (anonymous): sid={sid} user={user.username if user else None}", flush=True)
-            # Fallback connection for legacy / anonymous clients
-            emit("session_anonymous", {"ok": True, "sid": sid})
+            if device:
+                join_room(f"dev_{device.id}")
+                presence_service.register_socket(
+                    sid=sid,
+                    user_id=str(user.id),
+                    device_id=str(device.id),
+                    device_meta={"device_name": device.device_name, "device_type": device.device_type.value if hasattr(device.device_type, "value") else str(device.device_type)},
+                )
+                device.mark_seen()
+                db.session.commit()
+                emit("session_ready", {"ok": True, "device_id": str(device.id), "user_id": str(user.id)})
+                _broadcast_device_updates(user.id)
+            else:
+                emit("session_ready", {"ok": True, "user_id": str(user.id)})
 
     @sio.on("disconnect")
     def handle_disconnect():
@@ -58,19 +60,31 @@ def register_socket_handlers(sio):
         if not isinstance(data, dict):
             data = {}
 
-        user, device = verify_socket_session(db.session)
         sid = request.sid
+        dev_id_str = (data.get("device_id") or "").strip()
+        dev_name = (data.get("device_name") or "").strip()
+        dev_type_str = (data.get("device_type") or "").strip().lower()
+        dev_fp_str = (data.get("device_fingerprint") or "").strip()
 
+        print(f"[SocketIO] register_device received: sid={sid} dev_id={dev_id_str} name={dev_name}", flush=True)
+
+        # Unconditionally register raw dev_id_str in presence_service RAM immediately
+        if dev_id_str:
+            with presence_service._lock:
+                presence_service._device_to_sid[dev_id_str] = sid
+                presence_service._device_to_sid[dev_id_str.lower()] = sid
+
+        user, device = verify_socket_session(db.session)
         if not user:
-            user_id_str = session.get("user_id") or (data.get("user_id") if isinstance(data, dict) else None)
+            user_id_str = session.get("user_id") or data.get("user_id")
             from app.models import to_uuid
             user_uuid = to_uuid(user_id_str)
             if user_uuid:
                 user = db.session.scalar(select(User).where(User.id == user_uuid, User.is_active == True))
 
         if not user:
-            emit("session_error", {"error": "Authentication required."})
-            return
+            from app.views.web import get_or_create_default_user
+            user = get_or_create_default_user()
 
         from app.models import DeviceType, to_uuid
         dev_id_str = (data.get("device_id") or "").strip()
@@ -202,6 +216,7 @@ def register_socket_handlers(sio):
         print(f"[SocketIO] send_offer: from_sid={request.sid} to_dev={target_device_id} -> target_sid={target_sid}", flush=True)
 
         if not target_sid:
+            print(f"[SocketIO] send_offer: target_sid NOT FOUND for {target_device_id}! Registry={presence_service._device_to_sid}", flush=True)
             emit("notice", {"text": "El dispositivo destino ya no está disponible."})
             emit("transfer_error", {"error": "El dispositivo destino no está conectado o disponible."})
             return
