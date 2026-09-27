@@ -60,23 +60,28 @@ def get_current_device():
 @devices_bp.route("", methods=["GET"])
 @limiter.exempt
 def list_devices():
-    """List all enrolled devices for the authenticated user."""
+    """List all active enrolled devices for the authenticated user with real-time status."""
     current_user = require_user()
     if not current_user:
         return jsonify({"ok": False, "error": "Authentication required."}), 401
 
     db_sess = get_db()
     devices = db_sess.scalars(
-        select(Device).where(Device.user_id == current_user.id).order_by(Device.last_seen_at.desc())
+        select(Device).where(Device.user_id == current_user.id, Device.is_active == True).order_by(Device.last_seen_at.desc())
     ).all()
 
     current_device_id = session.get("device_id")
+    from app.services import presence_service
 
     return jsonify({
         "ok": True,
         "current_device_id": current_device_id,
         "devices": [
-            {**d.to_dict(), "is_current": str(d.id) == current_device_id}
+            {
+                **d.to_dict(),
+                "is_current": str(d.id) == current_device_id,
+                "is_online": presence_service.is_device_online(str(d.id), db_sess),
+            }
             for d in devices
         ],
     }), 200
@@ -168,6 +173,24 @@ def revoke_device(device_id):
     device.is_active = False
     device.updated_at = datetime.now(timezone.utc)
     db_sess.commit()
+
+    from app.services import presence_service
+    dev_str = str(device.id)
+    with presence_service._lock:
+        sid = presence_service._device_to_sid.pop(dev_str, None)
+        presence_service._device_to_sid.pop(dev_str.lower(), None)
+        if sid:
+            presence_service._sid_to_info.pop(sid, None)
+
+    try:
+        from app.extensions import socketio
+        socketio.emit(
+            "devices_updated",
+            {"devices": presence_service.get_visible_devices_for_user(db_sess, current_user.id)},
+            to=f"user_{current_user.id}",
+        )
+    except Exception:
+        pass
 
     if is_current:
         session.clear()

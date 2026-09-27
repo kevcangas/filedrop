@@ -115,6 +115,7 @@
           window.loadFriendsList();
         } else if (targetTab === "config") {
           loadConnectionQR();
+          loadEnrolledDevices();
         }
       });
     });
@@ -938,6 +939,78 @@
           toast("Error de conexión al renombrar.", true);
         }
       };
+    }
+
+    const btnRefreshDevs = document.getElementById("btn-refresh-devices-list");
+    if (btnRefreshDevs) {
+      btnRefreshDevs.onclick = () => loadEnrolledDevices();
+    }
+  }
+
+  async function loadEnrolledDevices() {
+    const container = document.getElementById("enrolled-devices-list");
+    if (!container) return;
+    try {
+      const res = await fetch("/api/devices");
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!data || !data.ok || !Array.isArray(data.devices)) return;
+
+      container.innerHTML = "";
+      if (data.devices.length === 0) {
+        container.innerHTML = '<p class="empty-hint">No hay dispositivos registrados.</p>';
+        return;
+      }
+
+      data.devices.forEach((d) => {
+        const isCurrent = d.is_current || d.id === myDeviceId;
+        const row = document.createElement("div");
+        row.className = "device-row";
+        row.style.cursor = "default";
+        row.innerHTML = `
+          <span class="pulse ${d.is_online ? "live" : ""}"></span>
+          <div style="flex:1;">
+            <div class="spread" style="align-items:center;">
+              <span class="device-name" style="font-size:13px;">
+                ${getDeviceIcon(d.device_type)} ${escapeHtml(d.device_name)}
+              </span>
+              ${isCurrent ? '<span class="device-account-badge badge-own">Este equipo</span>' : ""}
+            </div>
+            <div class="device-meta" style="font-size:11px; margin-top:2px;">
+              ${d.is_online ? "🟢 En línea" : "⚪ Desconectado"} · ID: ${d.id.substring(0, 8)}…
+            </div>
+          </div>
+          ${
+            !isCurrent
+              ? `<button class="btn-danger btn-revoke-device" data-id="${d.id}" data-name="${escapeHtml(d.device_name)}" style="font-size:11px; padding:4px 8px;" title="Desvincular y eliminar este dispositivo">🗑️</button>`
+              : ""
+          }
+        `;
+        container.appendChild(row);
+      });
+
+      container.querySelectorAll(".btn-revoke-device").forEach((btn) => {
+        btn.onclick = async () => {
+          const devId = btn.dataset.id;
+          const devName = btn.dataset.name;
+          if (confirm(`¿Estás seguro de que deseas desvincular "${devName}"? Ya no podrá enviar ni recibir archivos.`)) {
+            try {
+              const delRes = await fetch(`/api/devices/${devId}/revoke`, { method: "POST" });
+              if (delRes.ok) {
+                toast(`Dispositivo "${devName}" desvinculado con éxito.`);
+                loadEnrolledDevices();
+                fetchVisibleDevices();
+              } else {
+                toast("No se pudo desvincular el dispositivo.", true);
+              }
+            } catch {
+              toast("Error al desvincular dispositivo.", true);
+            }
+          }
+        };
+      });
+    } catch {
+      // Ignorar error transitorio
     }
   }
 
