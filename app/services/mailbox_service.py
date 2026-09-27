@@ -88,7 +88,7 @@ class MailboxService:
 
         return purged_count
 
-    def start_cleanup_loop(self, app_factory) -> None:
+    def start_cleanup_loop(self, app_or_factory) -> None:
         """Start a daemon thread periodically purging expired mailbox files."""
         if self._cleanup_thread and self._cleanup_thread.is_alive():
             return
@@ -96,7 +96,8 @@ class MailboxService:
         def _loop():
             while not self._stop_event.is_set():
                 try:
-                    with app_factory().app_context():
+                    app = app_or_factory() if (callable(app_or_factory) and not hasattr(app_or_factory, "app_context")) else app_or_factory
+                    with app.app_context():
                         from app.extensions import db
                         self.purge_expired(db.session)
                 except Exception as ex:

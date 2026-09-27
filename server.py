@@ -82,7 +82,7 @@ if __name__ == "__main__":
             mailbox_dir=app.config["MAILBOX_DIR"],
             default_ttl_hours=app.config["MAILBOX_TTL_HOURS"],
         )
-        mailbox_svc.start_cleanup_loop(create_app)
+        mailbox_svc.start_cleanup_loop(app)
 
     print_banner(port, local_ip)
     auto_open_browser(port)
