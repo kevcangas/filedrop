@@ -27,21 +27,24 @@ class PresenceService:
     def register_socket(self, sid: str, user_id: str, device_id: str, device_meta: Optional[dict] = None) -> None:
         """Register a connected socket session."""
         with self._lock:
+            dev_norm = str(device_id).strip().lower()
+            u_norm = str(user_id).strip().lower()
+
             # If device already had an active socket, evict the stale one
-            old_sid = self._device_to_sid.get(device_id)
+            old_sid = self._device_to_sid.get(dev_norm)
             if old_sid and old_sid != sid:
                 self._sid_to_info.pop(old_sid, None)
 
-            self._device_to_sid[device_id] = sid
+            self._device_to_sid[dev_norm] = sid
             self._sid_to_info[sid] = {
-                "device_id": device_id,
-                "user_id": user_id,
+                "device_id": dev_norm,
+                "user_id": u_norm,
                 "connected_at": datetime.now(timezone.utc),
                 "meta": device_meta or {},
             }
-            if user_id not in self._user_to_devices:
-                self._user_to_devices[user_id] = set()
-            self._user_to_devices[user_id].add(device_id)
+            if u_norm not in self._user_to_devices:
+                self._user_to_devices[u_norm] = set()
+            self._user_to_devices[u_norm].add(dev_norm)
 
     def unregister_socket(self, sid: str) -> Optional[dict]:
         """Remove a disconnected socket and return its session info."""
@@ -62,10 +65,29 @@ class PresenceService:
 
             return info
 
-    def get_sid_for_device(self, device_id: str) -> Optional[str]:
-        """Look up active Socket.IO sid for target device."""
+    def get_sid_for_device(self, device_id: str, user_id: Optional[str] = None, exclude_sid: Optional[str] = None) -> Optional[str]:
+        """Look up active Socket.IO sid for target device, with user-level fallback."""
         with self._lock:
-            return self._device_to_sid.get(str(device_id))
+            dev_id_norm = str(device_id).strip().lower() if device_id else ""
+            if dev_id_norm:
+                sid = self._device_to_sid.get(dev_id_norm)
+                if sid and (not exclude_sid or sid != exclude_sid):
+                    return sid
+
+                for did, s in self._device_to_sid.items():
+                    if str(did).strip().lower() == dev_id_norm:
+                        if not exclude_sid or s != exclude_sid:
+                            return s
+
+            # Fallback: if user_id is provided, find any active socket for this user
+            if user_id:
+                uid_norm = str(user_id).strip().lower()
+                for s, info in self._sid_to_info.items():
+                    if str(info.get("user_id")).strip().lower() == uid_norm:
+                        if not exclude_sid or s != exclude_sid:
+                            return s
+
+            return None
 
     def is_device_online(self, device_id: str, db_session=None) -> bool:
         """Check if device is currently connected via WebSocket or recently seen."""
