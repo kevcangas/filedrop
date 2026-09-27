@@ -13,8 +13,8 @@ from app.models import Device, Friendship, FriendshipStatus, User, to_uuid
 
 def verify_socket_session(db_session) -> Tuple[Optional[User], Optional[Device]]:
     """Authenticate incoming WebSocket request using the Flask HTTP session."""
-    user_id = session.get("user_id")
-    device_id = session.get("device_id")
+    user_id = session.get("user_id") or session.get("_user_id")
+    device_id = session.get("device_id") or request.cookies.get("enlace_device_id")
 
     if not user_id and session.get("logged_in"):
         from app.views.web import get_or_create_default_user
@@ -61,20 +61,25 @@ def verify_socket_session(db_session) -> Tuple[Optional[User], Optional[Device]]
     return user, device
 
 
-def verify_friendship_acl(db_session, sender_user_id: uuid.UUID, recipient_user_id: uuid.UUID) -> bool:
+def verify_friendship_acl(db_session, sender_user_id, recipient_user_id) -> bool:
     """
     Evaluate if two users are allowed to communicate:
     1. If sender and recipient are the same user (own devices), communication is permitted.
     2. If an ACCEPTED friendship exists between the two users, communication is permitted.
     3. Otherwise, communication is strictly blocked.
     """
-    if sender_user_id == recipient_user_id:
+    from app.models import to_uuid
+    s_uuid = to_uuid(sender_user_id)
+    r_uuid = to_uuid(recipient_user_id)
+    if not s_uuid or not r_uuid:
+        return False
+    if s_uuid == r_uuid:
         return True
 
     stmt = select(Friendship).where(
         or_(
-            (Friendship.requester_id == sender_user_id) & (Friendship.addressee_id == recipient_user_id),
-            (Friendship.requester_id == recipient_user_id) & (Friendship.addressee_id == sender_user_id),
+            (Friendship.requester_id == s_uuid) & (Friendship.addressee_id == r_uuid),
+            (Friendship.requester_id == r_uuid) & (Friendship.addressee_id == s_uuid),
         ),
         Friendship.status == FriendshipStatus.ACCEPTED,
     )

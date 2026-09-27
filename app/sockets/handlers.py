@@ -30,7 +30,7 @@ def register_socket_handlers(sio):
                 sid=sid,
                 user_id=str(user.id),
                 device_id=str(device.id),
-                device_meta={"device_name": device.device_name, "device_type": device.device_type.value},
+                device_meta={"device_name": device.device_name, "device_type": device.device_type.value if hasattr(device.device_type, "value") else str(device.device_type)},
             )
             device.mark_seen()
             db.session.commit()
@@ -46,9 +46,11 @@ def register_socket_handlers(sio):
         sid = request.sid
         info = presence_service.unregister_socket(sid)
         print(f"[SocketIO] Disconnect: sid={sid} info={info}", flush=True)
-        if info:
-            user_id = uuid.UUID(info["user_id"])
-            _broadcast_device_updates(user_id)
+        if info and info.get("user_id"):
+            from app.models import to_uuid
+            user_id = to_uuid(info["user_id"])
+            if user_id:
+                _broadcast_device_updates(user_id)
 
     @sio.on("register_device")
     def handle_register_device(data):
@@ -337,10 +339,12 @@ def register_socket_handlers(sio):
         2. Optionally accepted friends if explicit sharing is specified.
         """
         sender_device_id = presence_service.get_device_for_sid(request.sid)
-        if not sender_device_id:
+        from app.models import to_uuid
+        dev_u = to_uuid(sender_device_id)
+        if not dev_u:
             return
 
-        device = db.session.scalar(select(Device).where(Device.id == uuid.UUID(sender_device_id)))
+        device = db.session.scalar(select(Device).where(Device.id == dev_u))
         if not device:
             return
 
@@ -358,11 +362,15 @@ def register_socket_handlers(sio):
         )
 
 
-def _broadcast_device_updates(user_id: uuid.UUID):
+def _broadcast_device_updates(user_id):
     """Emit updated visible devices list to the user's active sockets and accepted friends."""
-    from app.models import Friendship, FriendshipStatus
+    from app.models import Friendship, FriendshipStatus, to_uuid
+    u_uuid = to_uuid(user_id)
+    if not u_uuid:
+        return
+
     friend_stmt = select(Friendship).where(
-        (Friendship.requester_id == user_id) | (Friendship.addressee_id == user_id),
+        (Friendship.requester_id == u_uuid) | (Friendship.addressee_id == u_uuid),
         Friendship.status == FriendshipStatus.ACCEPTED,
     )
     friendships = db.session.scalars(friend_stmt).all()
