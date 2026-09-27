@@ -332,6 +332,12 @@
   </div>
 </div>
 
+<!-- Contexto Inicial del Servidor -->
+<script>
+  window.__FILEDROP_USER__ = {{ current_user | tojson | safe }};
+  window.__FILEDROP_DEVICE__ = {{ current_device | tojson | safe }};
+</script>
+
 <!-- Scripts del Cliente -->
 <script src="/static/socket.io.min.js"></script>
 <script src="/static/jszip.min.js"></script>

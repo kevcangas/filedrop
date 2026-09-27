@@ -67,10 +67,21 @@ class PresenceService:
         with self._lock:
             return self._device_to_sid.get(str(device_id))
 
-    def is_device_online(self, device_id: str) -> bool:
-        """Check if device is currently connected via WebSocket."""
+    def is_device_online(self, device_id: str, db_session=None) -> bool:
+        """Check if device is currently connected via WebSocket or recently seen."""
         with self._lock:
-            return str(device_id) in self._device_to_sid
+            if str(device_id) in self._device_to_sid:
+                return True
+        if db_session:
+            from app.models import Device, to_uuid
+            u = to_uuid(device_id)
+            if u:
+                dev = db_session.scalar(select(Device).where(Device.id == u))
+                if dev and dev.last_seen_at:
+                    now_utc = datetime.now(timezone.utc)
+                    dt = dev.last_seen_at.replace(tzinfo=timezone.utc) if dev.last_seen_at.tzinfo is None else dev.last_seen_at
+                    return (now_utc - dt).total_seconds() < 45
+        return False
 
     def get_user_for_sid(self, sid: str) -> Optional[str]:
         """Look up user_id for a given socket."""
@@ -89,7 +100,7 @@ class PresenceService:
         Query all devices visible to current_user:
         1. All devices belonging to current_user.
         2. All devices belonging to users with an ACCEPTED friendship.
-        Only returns currently active/online devices.
+        Returns presence status using hybrid detection (active WebSocket OR active REST polling in last 45s).
         """
         # Find accepted friend user IDs
         friend_stmt = select(Friendship).where(
@@ -109,11 +120,19 @@ class PresenceService:
         )
         results = db_session.execute(dev_stmt).all()
 
+        now_utc = datetime.now(timezone.utc)
         visible_list = []
         with self._lock:
             for device, username, display_name in results:
                 dev_id_str = str(device.id)
-                is_online = dev_id_str in self._device_to_sid
+                has_active_socket = dev_id_str in self._device_to_sid
+                recently_active = False
+                if device.last_seen_at:
+                    dt = device.last_seen_at.replace(tzinfo=timezone.utc) if device.last_seen_at.tzinfo is None else device.last_seen_at
+                    recently_active = (now_utc - dt).total_seconds() < 45
+
+                is_online = has_active_socket or recently_active
+
                 visible_list.append({
                     "device_id": dev_id_str,
                     "device_name": device.device_name,

@@ -60,7 +60,7 @@ def register_socket_handlers(sio):
         sid = request.sid
 
         if not user:
-            user_id_str = session.get("user_id")
+            user_id_str = session.get("user_id") or (data.get("user_id") if isinstance(data, dict) else None)
             from app.models import to_uuid
             user_uuid = to_uuid(user_id_str)
             if user_uuid:

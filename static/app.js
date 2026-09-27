@@ -261,6 +261,13 @@
       if (data && data.ok && Array.isArray(data.devices)) {
         if (data.current_device_id && !myDeviceId) {
           myDeviceId = data.current_device_id;
+          socket.emit("register_device", {
+            user_id: myUserId,
+            device_id: myDeviceId,
+            device_name: myDeviceName,
+            device_type: getDetectedDeviceType(),
+            device_fingerprint: getDeviceFingerprint(),
+          });
         }
         devices = data.devices;
         renderDevices();
@@ -279,6 +286,7 @@
         ind.innerHTML = '<span class="pulse live"></span> En línea';
       }
       socket.emit("register_device", {
+        user_id: myUserId,
         device_id: myDeviceId,
         device_name: myDeviceName,
         device_type: getDetectedDeviceType(),
