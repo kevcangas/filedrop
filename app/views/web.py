@@ -45,6 +45,8 @@ def enforce_auth():
     open_prefixes = (
         "/static/",
         "/api/auth/",
+        "/api/buzon",
+        "/api/mailbox",
         "/s3/share/",
         "/api/s3/share/",
         "/api/s3/status",
