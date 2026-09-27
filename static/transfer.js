@@ -222,7 +222,7 @@ function itemsFromDataTransfer(dataTransfer) {
  * Ofrece un archivo a un dispositivo especifico (por device_id). No empieza
  * a mandar datos hasta que el receptor responda con "aceptar".
  */
-function offerFile(socket, file, { targetDeviceId, preview, isBundle, bundleCount, onProgress, onDone, onRejected }) {
+function offerFile(socket, file, { targetDeviceId, fromDeviceId, fromDeviceName, preview, isBundle, bundleCount, onProgress, onDone, onRejected }) {
   const fileId = makeFileId();
   const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
 
@@ -234,14 +234,24 @@ function offerFile(socket, file, { targetDeviceId, preview, isBundle, bundleCoun
     onProgress,
     onDone,
     onRejected,
+    started: false,
   };
 
   const offerPayload = {
     file_id: fileId,
+    transfer_id: fileId,
     target_device_id: targetDeviceId,
+    to_device_id: targetDeviceId,
+    from_device_id: fromDeviceId || null,
+    _from_device_id: fromDeviceId || null,
+    from_device_name: fromDeviceName || null,
+    _from_device_name: fromDeviceName || null,
     filename: file.name,
+    file_name: file.name,
     size: file.size,
+    file_size: file.size,
     mimetype: file.type || "application/octet-stream",
+    file_type: file.type || "application/octet-stream",
   };
   if (preview) offerPayload.preview = preview;
   if (isBundle) {
@@ -249,14 +259,19 @@ function offerFile(socket, file, { targetDeviceId, preview, isBundle, bundleCoun
     offerPayload.bundle_count = bundleCount;
   }
 
+  console.log("[P2P] Emitting send_offer to server:", offerPayload);
   socket.emit("send_offer", offerPayload);
   return fileId;
 }
 
 function sendNextChunk(socket, fileId) {
   const tx = outgoing[fileId];
-  if (!tx) return;
+  if (!tx) {
+    console.warn("[P2P] sendNextChunk: No outgoing transfer found for fileId:", fileId);
+    return;
+  }
   if (tx.chunkIndex >= tx.totalChunks) {
+    console.log("[P2P] All chunks sent successfully for fileId:", fileId);
     if (tx.onDone) tx.onDone();
     delete outgoing[fileId];
     return;
@@ -276,30 +291,35 @@ function sendNextChunk(socket, fileId) {
       total_chunks: tx.totalChunks,
       data: arrayBufferToBase64(reader.result),
     };
+    console.log(`[P2P] Emitting file_chunk: ${tx.chunkIndex + 1}/${tx.totalChunks} (${fileId})`);
     socket.emit("file_chunk", payload);
     if (tx.onProgress) {
       tx.onProgress(Math.round(((tx.chunkIndex + 1) / tx.totalChunks) * 100));
     }
-    // Esperamos el ack antes de mandar el siguiente fragmento (control de flujo simple)
   };
   reader.readAsArrayBuffer(slice);
 }
 
-/** Debe llamarse cuando llega file_response_relay con accept:true, para iniciar el envio. */
+/** Debe llamarse cuando llega file_response con accept:true, para iniciar el envio. */
 function startSendingAfterAccept(socket, fileId) {
-  sendNextChunk(socket, fileId);
+  console.log("[P2P] startSendingAfterAccept triggered for fileId:", fileId);
+  const tx = outgoing[fileId];
+  if (tx && !tx.started) {
+    tx.started = true;
+    sendNextChunk(socket, fileId);
+  }
 }
 
 function handleAckReceived(socket, data) {
-  const tx = outgoing[data.file_id];
+  const fileId = data.file_id || data.transfer_id;
+  const tx = outgoing[fileId];
   if (!tx) return;
-  if (data.chunk_index === tx.chunkIndex) {
+  const ackIndex = Number(data.chunk_index);
+  console.log(`[P2P] handleAckReceived: ack chunk ${ackIndex}, current tx.chunkIndex: ${tx.chunkIndex}`);
+  if (ackIndex === Number(tx.chunkIndex)) {
     tx.chunkIndex += 1;
-    sendNextChunk(socket, data.file_id);
+    sendNextChunk(socket, fileId);
   }
-  // Si el chunk_index no coincide (p. ej. llego un ack duplicado tras una
-  // reconexion), simplemente lo ignoramos: sendNextChunk ya se habra
-  // encargado de seguir desde donde iba.
 }
 
 /* =========================================================================
@@ -308,6 +328,7 @@ function handleAckReceived(socket, data) {
 
 /** Registra una transferencia entrante pendiente de recibir fragmentos. */
 function prepareIncoming(fileId, { filename, size, mimetype, totalChunks, fromDeviceId, onProgress, onComplete }) {
+  console.log("[P2P] prepareIncoming registered for fileId:", fileId, "chunks:", totalChunks, "from:", fromDeviceId);
   incoming[fileId] = {
     chunks: new Array(totalChunks),
     received: 0,
@@ -322,36 +343,42 @@ function prepareIncoming(fileId, { filename, size, mimetype, totalChunks, fromDe
 }
 
 function handleIncomingChunk(socket, data) {
-  const rx = incoming[data.file_id];
-  if (!rx) return;
+  const fileId = data.file_id || data.transfer_id;
+  const rx = incoming[fileId];
+  if (!rx) {
+    console.warn("[P2P] handleIncomingChunk: unknown incoming transfer for fileId:", fileId);
+    return;
+  }
 
-  // Guardamos de donde vino, para poder re-confirmar tras una reconexion
+  const chunkIdx = Number(data.chunk_index);
   if (data._from_device_id) rx.fromDeviceId = data._from_device_id;
+  if (data.from_device_id) rx.fromDeviceId = data.from_device_id;
 
-  if (!rx.chunks[data.chunk_index]) {
-    rx.chunks[data.chunk_index] = base64ToUint8Array(data.data);
+  if (!rx.chunks[chunkIdx]) {
+    rx.chunks[chunkIdx] = base64ToUint8Array(data.data);
     rx.received += 1;
+    console.log(`[P2P] Received chunk ${rx.received}/${rx.total} for fileId: ${fileId}`);
   }
   if (rx.onProgress) rx.onProgress(Math.round((rx.received / rx.total) * 100));
 
-  emitAckFor(socket, rx, data.file_id, data.chunk_index);
+  emitAckFor(socket, rx, fileId, chunkIdx);
 
   if (rx.received >= rx.total) {
+    console.log(`[P2P] All chunks received for ${fileId}, creating Blob.`);
     const blob = new Blob(rx.chunks, { type: rx.mimetype });
     if (rx.onComplete) rx.onComplete(blob, rx.filename);
-    delete incoming[data.file_id];
+    delete incoming[fileId];
   }
 }
 
 function emitAckFor(socket, rx, fileId, chunkIndex) {
-  // La confirmacion vuelve al dispositivo que nos mando el archivo.
   if (!rx.fromDeviceId) return;
   socket.emit("chunk_ack", {
     file_id: fileId,
     transfer_id: fileId,
     target_device_id: rx.fromDeviceId,
     to_device_id: rx.fromDeviceId,
-    chunk_index: chunkIndex,
+    chunk_index: Number(chunkIndex),
   });
 }
 

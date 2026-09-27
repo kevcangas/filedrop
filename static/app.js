@@ -425,8 +425,11 @@
 
   // --- Ofertas Entrantes y Modal de Aceptación ---------------------------------
   function handleIncomingOffer(offer) {
-    const isOwn = Boolean(offer.auto_accept || offer.is_own_account);
+    console.log("[P2P] Received offer on socket:", offer);
     const fileId = offer.transfer_id || offer.file_id;
+    if (!fileId) return;
+
+    const isOwn = Boolean(offer.auto_accept || offer.is_own_account);
     const fileName = offer.file_name || offer.filename || "archivo";
     const fileSize = offer.file_size || offer.size || 0;
     const fileType = offer.file_type || offer.mimetype || "application/octet-stream";
@@ -457,6 +460,7 @@
         });
       }
 
+      console.log("[P2P] Auto-accepting offer for:", fileId, "sending file_response to:", fromDevId);
       socket.emit("file_response", {
         target_device_id: fromDevId,
         to_device_id: fromDevId,
@@ -554,6 +558,7 @@
   }
 
   function handleFileResponse(resp) {
+    console.log("[P2P] handleFileResponse received on sender:", resp);
     const fileId = resp.file_id || resp.transfer_id;
     if (resp.accept) {
       toast("El destinatario aceptó el archivo. Iniciando envío...");
@@ -656,6 +661,8 @@
       if (typeof window.offerFile === "function") {
         window.offerFile(socket, bundle.file, {
           targetDeviceId: targetDevId,
+          fromDeviceId: myDeviceId,
+          fromDeviceName: myDeviceName,
           isBundle: bundle.isBundle,
           bundleCount: bundle.count,
           onProgress: (p) => updateTransferProgress(rowId, p / 100),
