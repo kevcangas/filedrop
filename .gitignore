@@ -42,5 +42,6 @@ dist/
 Thumbs.db
 
 .specs/
-graphify-out/cache/
-graphify-out/.*
+graphify-out/
+.planning/
+PIPELINE_PROGRESS.md
