@@ -200,3 +200,84 @@ def revoke_device(device_id):
         "message": "Device revoked.",
         "session_terminated": is_current,
     }), 200
+
+
+@devices_bp.route("/switch", methods=["POST"])
+def switch_active_device():
+    """Switch active device identity for currently authenticated session."""
+    import uuid
+    current_user = require_user()
+    if not current_user:
+        return jsonify({"ok": False, "error": "Authentication required."}), 401
+
+    data = request.get_json(silent=True) or {}
+    device_id = (data.get("device_id") or "").strip()
+    new_device_data = data.get("new_device")
+    device_fingerprint = (data.get("device_fingerprint") or "").strip()
+    remember_device = bool(data.get("remember_device", True))
+
+    db_sess = get_db()
+    target_device = None
+
+    if device_id:
+        dev_uuid = to_uuid(device_id)
+        if not dev_uuid:
+            return jsonify({"ok": False, "error": "Invalid device ID."}), 400
+
+        target_device = db_sess.scalar(
+            select(Device).where(Device.id == dev_uuid, Device.user_id == current_user.id, Device.is_active == True)
+        )
+        if not target_device:
+            return jsonify({"ok": False, "error": "Device not found."}), 404
+
+        target_device.mark_seen()
+        if remember_device and device_fingerprint:
+            conflicting_dev = db_sess.scalar(
+                select(Device).where(
+                    Device.user_id == current_user.id,
+                    Device.device_fingerprint == device_fingerprint,
+                    Device.id != target_device.id,
+                )
+            )
+            if conflicting_dev:
+                conflicting_dev.device_fingerprint = str(uuid.uuid4())
+            target_device.device_fingerprint = device_fingerprint
+
+    elif new_device_data and isinstance(new_device_data, dict):
+        new_name = (new_device_data.get("device_name") or "Nuevo Dispositivo").strip()
+        new_type_str = (new_device_data.get("device_type") or "pc").strip().lower()
+        from app.models import DeviceType
+        try:
+            new_type = DeviceType(new_type_str)
+        except ValueError:
+            new_type = DeviceType.PC
+
+        fp = device_fingerprint or str(uuid.uuid4())
+        conflicting_dev = db_sess.scalar(
+            select(Device).where(Device.user_id == current_user.id, Device.device_fingerprint == fp)
+        )
+        if conflicting_dev:
+            conflicting_dev.device_fingerprint = str(uuid.uuid4())
+
+        target_device = Device(
+            user_id=current_user.id,
+            device_name=new_name,
+            device_type=new_type,
+            device_fingerprint=fp,
+            last_seen_at=datetime.now(timezone.utc),
+            is_active=True,
+        )
+        db_sess.add(target_device)
+
+    else:
+        return jsonify({"ok": False, "error": "Device ID or new device parameters required."}), 400
+
+    db_sess.commit()
+    session["device_id"] = str(target_device.id)
+
+    return jsonify({
+        "ok": True,
+        "message": "Dispositivo activo cambiado correctamente.",
+        "device": target_device.to_dict(),
+    }), 200
+
