@@ -30,14 +30,15 @@
   let serverDevName = (serverDevice.device_name || "").toLowerCase();
 
   let myDeviceId = "";
-  if (serverDeviceId && ((isMobileClient && (serverDeviceType === "mobile" || serverDevName.includes("cel"))) || (!isMobileClient && (serverDeviceType === "pc" || serverDevName.includes("pc"))))) {
+  if (serverDeviceId) {
     myDeviceId = serverDeviceId;
     localStorage.setItem("enlace_device_id", serverDeviceId);
-    localStorage.setItem("enlace_device_type", isMobileClient ? "mobile" : "pc");
+    if (serverDeviceType) localStorage.setItem("enlace_device_type", serverDeviceType);
+    if (serverDevice.device_name) localStorage.setItem("enlace_device_name", serverDevice.device_name);
   } else {
     let storedId = localStorage.getItem("enlace_device_id") || "";
     let storedType = localStorage.getItem("enlace_device_type") || "";
-    if (storedId && ((isMobileClient && storedType === "mobile") || (!isMobileClient && storedType === "pc"))) {
+    if (storedId) {
       myDeviceId = storedId;
     }
   }
@@ -1026,6 +1027,115 @@
       };
     }
   }
+
+  // ── Conmutador de Dispositivo Activo ──
+  window.openDeviceSwitchModal = async function () {
+    const modal = document.getElementById("device-switch-modal");
+    if (!modal) return;
+    modal.style.display = "flex";
+
+    const list = document.getElementById("device-switch-list");
+    list.innerHTML = '<p class="empty-hint">Consultando dispositivos registrados...</p>';
+
+    try {
+      const res = await fetch("/api/devices");
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        list.innerHTML = `<p class="empty-hint" style="color:var(--danger);">${data.error || "Error al cargar dispositivos."}</p>`;
+        return;
+      }
+
+      const devList = data.devices || [];
+      if (devList.length === 0) {
+        list.innerHTML = '<p class="empty-hint">No tienes otros dispositivos registrados.</p>';
+        return;
+      }
+
+      list.innerHTML = "";
+      devList.forEach((dev) => {
+        const isCurrent = dev.id === myDeviceId;
+        const card = document.createElement("div");
+        card.className = "switch-device-card" + (isCurrent ? " current" : "");
+        const dType = (dev.device_type || "pc").toLowerCase();
+        const dName = (dev.device_name || "").toLowerCase();
+        const icon = (dType === "mobile" || dName.includes("cel") || dName.includes("movil") || dName.includes("phone")) ? "📱" :
+                     (dType === "tablet" || dName.includes("ipad") || dName.includes("tab") ? "📟" : (dType === "server" ? "🖥️" : "💻"));
+        card.innerHTML = `
+          <span style="font-size:22px;">${icon}</span>
+          <div style="flex:1; min-width:0;">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <strong style="color:var(--text); font-size:13px;">${escapeHtml(dev.device_name)}</strong>
+              ${isCurrent ? '<span class="dev-badge-current">En uso</span>' : ''}
+              ${dev.is_online ? '<span class="role-pill" style="font-size:9px; padding:1px 6px;">● Online</span>' : ''}
+            </div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">
+              ${(dev.device_type || "pc").toUpperCase()}
+            </div>
+          </div>
+          ${!isCurrent ? '<button type="button" class="btn-subtle" style="font-size:11px;">Usar este</button>' : ''}
+        `;
+        if (!isCurrent) {
+          card.onclick = () => window.switchActiveDevice(dev.id, dev.device_name, dev.device_type);
+        }
+        list.appendChild(card);
+      });
+    } catch (err) {
+      list.innerHTML = '<p class="empty-hint" style="color:var(--danger);">Error de conexión al cargar dispositivos.</p>';
+    }
+  };
+
+  window.closeDeviceSwitchModal = function () {
+    const modal = document.getElementById("device-switch-modal");
+    if (modal) modal.style.display = "none";
+  };
+
+  window.switchActiveDevice = async function (deviceId, deviceName, deviceType) {
+    try {
+      const res = await fetch("/api/devices/switch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          device_id: deviceId,
+          remember_device: true,
+          device_fingerprint: localStorage.getItem("enlace_device_fingerprint") || "",
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        toast(data.error || "No se pudo cambiar de dispositivo.", "error");
+        return;
+      }
+
+      myDeviceId = deviceId;
+      myDeviceName = deviceName || myDeviceName;
+      localStorage.setItem("enlace_device_id", deviceId);
+      if (deviceName) localStorage.setItem("enlace_device_name", deviceName);
+      if (deviceType) localStorage.setItem("enlace_device_type", deviceType);
+      document.cookie = "enlace_device_id=" + encodeURIComponent(deviceId) + "; path=/; max-age=31536000; SameSite=Lax";
+
+      // Update badge UI
+      const badgeName = document.getElementById("badge-device-name");
+      const badgeIcon = document.getElementById("badge-device-icon");
+      if (badgeName) badgeName.textContent = myDeviceName;
+      if (badgeIcon) {
+        const dType = (deviceType || "pc").toLowerCase();
+        const dName = (myDeviceName || "").toLowerCase();
+        badgeIcon.textContent = (dType === "mobile" || dName.includes("cel") || dName.includes("movil") || dName.includes("phone")) ? "📱" :
+                                (dType === "tablet" ? "📟" : (dType === "server" ? "🖥️" : "💻"));
+      }
+
+      window.closeDeviceSwitchModal();
+      toast(`Dispositivo activo: ${myDeviceName}`);
+
+      // Re-register in socket
+      if (socket && socket.connected) {
+        socket.emit("register_device", { device_id: myDeviceId, device_name: myDeviceName, device_type: deviceType });
+      }
+      await fetchVisibleDevices();
+    } catch (err) {
+      toast("Error de conexión al cambiar dispositivo.", "error");
+    }
+  };
 
   // --- Inicialización al Cargar el DOM -----------------------------------------
   document.addEventListener("DOMContentLoaded", () => {

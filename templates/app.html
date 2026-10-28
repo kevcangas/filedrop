@@ -22,9 +22,12 @@
     <div class="row brand-group">
       <span class="brand-mark">FILEDROP</span>
       <span class="brand-sub d-none-sm">Transferencia P2P & Nube S3</span>
-      <span class="role-pill" id="badge-device-type">
-        {{ "💻 PC" if current_device.device_type == "pc" else "📱 Móvil" }}
-      </span>
+      <button type="button" class="role-pill" id="badge-device-type" title="Haz clic para cambiar de dispositivo activo" onclick="openDeviceSwitchModal()">
+        <span id="badge-device-icon">{{ "💻" if current_device.device_type == "pc" else ("📱" if current_device.device_type == "mobile" else ("📟" if current_device.device_type == "tablet" else "🖥️")) }}</span>
+        <span id="badge-device-name">{{ current_device.device_name or ("PC" if current_device.device_type == "pc" else "Móvil") }}</span>
+        <span style="font-size:10px; opacity:0.7;">▾</span>
+      </button>
+
     </div>
     <div class="row header-actions">
       <span class="user-greeting" id="user-display-name">
@@ -342,6 +345,26 @@
     </div>
   </div>
 </div>
+
+<!-- ══════════════════ MODAL: CAMBIAR DISPOSITIVO ACTIVO ══════════════════ -->
+<div id="device-switch-modal" class="modal-backdrop" style="display:none;" role="dialog" aria-modal="true" onclick="if(event.target===this)closeDeviceSwitchModal()">
+  <div class="modal-window">
+    <div class="spread modal-header" style="margin-bottom:12px;">
+      <p class="modal-title" style="margin:0;">💻 Cambiar Dispositivo Activo</p>
+      <button type="button" id="device-switch-close" class="btn-icon" onclick="closeDeviceSwitchModal()">✖</button>
+    </div>
+    <p class="modal-desc" style="font-size:13px; color:var(--text-muted); margin-bottom:14px;">
+      Selecciona el dispositivo con el que deseas identificarte en este navegador:
+    </p>
+    <div id="device-switch-list" class="stack" style="gap:8px; max-height:260px; overflow-y:auto; margin-bottom:16px;">
+      <p class="empty-hint">Cargando dispositivos...</p>
+    </div>
+    <div class="modal-actions" style="justify-content:flex-end; gap:8px;">
+      <button type="button" class="btn-subtle" onclick="closeDeviceSwitchModal()">Cerrar</button>
+    </div>
+  </div>
+</div>
+
 
 <!-- Contexto Inicial del Servidor -->
 <script>

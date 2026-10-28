@@ -20,7 +20,7 @@
   }
   .auth-shell {
     width: 100%;
-    max-width: 440px;
+    max-width: 460px;
     background: var(--bg-surface);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-lg);
@@ -157,10 +157,155 @@
     user-select: none;
     text-align: center;
   }
-  .device-hint {
+
+  /* ── Estilos de Selección de Dispositivo ── */
+  .device-step-header {
+    margin-bottom: 18px;
+    text-align: left;
+  }
+  .device-step-title {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 0 0 4px;
+  }
+  .device-step-sub {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin: 0;
+  }
+  .device-select-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-height: 260px;
+    overflow-y: auto;
+    padding-right: 4px;
+    margin-bottom: 14px;
+  }
+  .device-select-list::-webkit-scrollbar {
+    width: 5px;
+  }
+  .device-select-list::-webkit-scrollbar-thumb {
+    background: var(--border-subtle);
+    border-radius: 4px;
+  }
+  .device-option-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    background: var(--bg-surface-raised);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    user-select: none;
+  }
+  .device-option-card:hover {
+    border-color: var(--accent-cyan);
+    background: rgba(0, 240, 255, 0.05);
+  }
+  .device-option-card.selected {
+    border-color: var(--accent-cyan);
+    background: rgba(0, 240, 255, 0.1);
+    box-shadow: 0 0 12px var(--accent-cyan-glow);
+  }
+  .device-option-card input[type="radio"] {
+    accent-color: var(--accent-cyan);
+    width: 17px;
+    height: 17px;
+    margin: 0;
+    cursor: pointer;
+  }
+  .device-option-icon {
+    font-size: 22px;
+    min-width: 26px;
+    text-align: center;
+  }
+  .device-option-info {
+    flex: 1;
+    min-width: 0;
+  }
+  .device-option-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .device-option-meta {
     font-size: 11px;
     color: var(--text-muted);
-    margin-top: 4px;
+    margin-top: 2px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .badge-tag {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 7px;
+    border-radius: 8px;
+    letter-spacing: 0.02em;
+  }
+  .badge-recognized {
+    background: rgba(16, 185, 129, 0.2);
+    color: #10b981;
+    border: 1px solid rgba(16, 185, 129, 0.4);
+  }
+  .badge-online {
+    background: rgba(0, 240, 255, 0.18);
+    color: var(--accent-cyan);
+    border: 1px solid rgba(0, 240, 255, 0.3);
+  }
+  .new-device-panel {
+    display: none;
+    margin-top: 8px;
+    margin-bottom: 12px;
+    padding: 12px;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px dashed var(--border-subtle);
+    border-radius: var(--radius-md);
+  }
+  .new-device-panel.active {
+    display: block;
+    animation: fadeIn 0.2s ease-out;
+  }
+  .remember-device-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 12px 0;
+    font-size: 12px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    user-select: none;
+  }
+  .remember-device-row input {
+    accent-color: var(--accent-cyan);
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+  }
+  .btn-secondary-back {
+    width: 100%;
+    padding: 10px;
+    font-size: 12px;
+    font-weight: 600;
+    background: transparent;
+    color: var(--text-muted);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    margin-top: 8px;
+  }
+  .btn-secondary-back:hover {
+    color: var(--text-primary);
+    border-color: var(--border);
   }
 </style>
 </head>
@@ -172,80 +317,119 @@
     <p class="brand-subtitle">Transferencia segura entre dispositivos y amigos</p>
   </div>
 
-  <div class="auth-tabs">
-    <button type="button" class="auth-tab active" id="tab-login-btn" onclick="switchTab('login')">Iniciar Sesión</button>
-    <button type="button" class="auth-tab" id="tab-register-btn" onclick="switchTab('register')">Crear Cuenta</button>
-  </div>
-
   <div id="auth-alert" class="auth-error"></div>
 
-  <!-- ── PANEL INICIAR SESIÓN ── -->
-  <div id="pane-login" class="tab-pane active">
-    <form id="form-login" onsubmit="handleLogin(event)">
-      <div class="input-group">
-        <label for="login-ident">Usuario o Correo</label>
-        <input type="text" id="login-ident" required autofocus autocomplete="username" placeholder="tu-usuario o email">
-      </div>
-      <div class="input-group">
-        <label for="login-pass">Contraseña</label>
-        <input type="password" id="login-pass" required autocomplete="current-password" placeholder="••••••••">
-      </div>
-      <div class="input-group">
-        <label for="login-device">Nombre de este dispositivo</label>
-        <input type="text" id="login-device" placeholder="Ej: Mi Laptop, Celular Personal">
-        <p class="device-hint">Cómo verán este dispositivo tus amigos conectados</p>
-      </div>
-      <button type="submit" class="btn-submit" id="btn-login-submit">Entrar</button>
-    </form>
+  <!-- ════════ PASO 1: CREDENCIALES / REGISTRO ════════ -->
+  <div id="auth-step-credentials">
+    <div class="auth-tabs" id="auth-tabs-bar">
+      <button type="button" class="auth-tab active" id="tab-login-btn" onclick="switchTab('login')">Iniciar Sesión</button>
+      <button type="button" class="auth-tab" id="tab-register-btn" onclick="switchTab('register')">Crear Cuenta</button>
+    </div>
+
+    <!-- ── PANEL INICIAR SESIÓN ── -->
+    <div id="pane-login" class="tab-pane active">
+      <form id="form-login" onsubmit="handleLogin(event)">
+        <div class="input-group">
+          <label for="login-ident">Usuario o Correo</label>
+          <input type="text" id="login-ident" required autofocus autocomplete="username" placeholder="tu-usuario o email">
+        </div>
+        <div class="input-group">
+          <label for="login-pass">Contraseña</label>
+          <input type="password" id="login-pass" required autocomplete="current-password" placeholder="••••••••">
+        </div>
+        <button type="submit" class="btn-submit" id="btn-login-submit">Continuar</button>
+      </form>
+    </div>
+
+    <!-- ── PANEL CREAR CUENTA ── -->
+    <div id="pane-register" class="tab-pane">
+      <form id="form-register" onsubmit="handleRegister(event)">
+        <div class="input-group">
+          <label for="reg-username">Nombre de Usuario</label>
+          <input type="text" id="reg-username" required autocomplete="username" placeholder="juan_perez">
+        </div>
+        <div class="input-group">
+          <label for="reg-email">Correo Electrónico</label>
+          <input type="email" id="reg-email" required autocomplete="email" placeholder="usuario@correo.com">
+        </div>
+        <div class="input-group">
+          <label for="reg-pass">Contraseña (Mínimo 8 caracteres)</label>
+          <input type="password" id="reg-pass" required minlength="8" autocomplete="new-password" placeholder="••••••••">
+        </div>
+        <div class="input-group">
+          <label for="reg-device">Nombre de tu Dispositivo</label>
+          <input type="text" id="reg-device" placeholder="Ej: Celular Galaxy, PC Oficina">
+        </div>
+        <div class="input-group">
+          <label for="reg-type">Tipo de Dispositivo</label>
+          <select id="reg-type">
+            <option value="pc">Computadora / Laptop (PC)</option>
+            <option value="mobile">Teléfono Móvil (Celular)</option>
+            <option value="tablet">Tableta</option>
+            <option value="server">Servidor</option>
+          </select>
+        </div>
+        <button type="submit" class="btn-submit" id="btn-reg-submit">Registrarme</button>
+      </form>
+    </div>
+
+    <!-- ── MODO LEGADO (CONTRASEÑA COMPARTIDA DEL SERVIDOR) ── -->
+    <details class="legacy-drawer" id="legacy-drawer-box">
+      <summary>¿Prefieres entrar con contraseña local del servidor?</summary>
+      <form method="POST" action="/login" style="margin-top:14px;">
+        <input type="hidden" name="next" value="{{ next_path or '/' }}">
+        <div class="input-group">
+          <label for="legacy-pass">Contraseña del Servidor</label>
+          <input type="password" id="legacy-pass" name="password" placeholder="Contraseña de la máquina anfitriona">
+        </div>
+        <button type="submit" class="btn-submit" style="background:var(--panel-2); color:var(--text); border:1px solid var(--border);">Acceso Rápido Local</button>
+      </form>
+    </details>
   </div>
 
-  <!-- ── PANEL CREAR CUENTA ── -->
-  <div id="pane-register" class="tab-pane">
-    <form id="form-register" onsubmit="handleRegister(event)">
-      <div class="input-group">
-        <label for="reg-username">Nombre de Usuario</label>
-        <input type="text" id="reg-username" required autocomplete="username" placeholder="juan_perez">
+  <!-- ════════ PASO 2: SELECCIÓN DE DISPOSITIVO ════════ -->
+  <div id="auth-step-device" style="display:none;">
+    <div class="device-step-header">
+      <p class="device-step-title" id="device-greeting">Hola 👋</p>
+      <p class="device-step-sub">¿Desde qué dispositivo estás ingresando?</p>
+    </div>
+
+    <form id="form-device-select" onsubmit="handleDeviceSelect(event)">
+      <div class="device-select-list" id="device-cards-container">
+        <!-- Renderizado dinámicamente -->
       </div>
-      <div class="input-group">
-        <label for="reg-email">Correo Electrónico</label>
-        <input type="email" id="reg-email" required autocomplete="email" placeholder="usuario@correo.com">
+
+      <div class="new-device-panel" id="new-device-panel">
+        <div class="input-group" style="margin-bottom:10px;">
+          <label for="new-dev-name">Nombre del nuevo equipo</label>
+          <input type="text" id="new-dev-name" placeholder="Ej: Mi Laptop Dell, PC Oficina">
+        </div>
+        <div class="input-group" style="margin-bottom:4px;">
+          <label for="new-dev-type">Tipo de equipo</label>
+          <select id="new-dev-type">
+            <option value="pc">Computadora / Laptop (PC)</option>
+            <option value="mobile">Teléfono Móvil (Celular)</option>
+            <option value="tablet">Tableta</option>
+            <option value="server">Servidor</option>
+          </select>
+        </div>
       </div>
-      <div class="input-group">
-        <label for="reg-pass">Contraseña (Mínimo 8 caracteres)</label>
-        <input type="password" id="reg-pass" required minlength="8" autocomplete="new-password" placeholder="••••••••">
-      </div>
-      <div class="input-group">
-        <label for="reg-device">Nombre de tu Dispositivo</label>
-        <input type="text" id="reg-device" placeholder="Ej: Celular Galaxy, PC Oficina">
-      </div>
-      <div class="input-group">
-        <label for="reg-type">Tipo de Dispositivo</label>
-        <select id="reg-type">
-          <option value="pc">Computadora / Laptop (PC)</option>
-          <option value="mobile">Teléfono Móvil (Celular)</option>
-          <option value="tablet">Tableta</option>
-          <option value="server">Servidor</option>
-        </select>
-      </div>
-      <button type="submit" class="btn-submit" id="btn-reg-submit">Registrarme</button>
+
+      <label class="remember-device-row">
+        <input type="checkbox" id="remember-device-check" checked>
+        <span>Recordar este dispositivo en este navegador</span>
+      </label>
+
+      <button type="submit" class="btn-submit" id="btn-device-submit">Entrar a FileDrop</button>
+      <button type="button" class="btn-secondary-back" onclick="backToCredentials()">← Cambiar de cuenta</button>
     </form>
   </div>
-
-  <!-- ── MODO LEGADO (CONTRASEÑA COMPARTIDA DEL SERVIDOR) ── -->
-  <details class="legacy-drawer">
-    <summary>¿Prefieres entrar con contraseña local del servidor?</summary>
-    <form method="POST" action="/login" style="margin-top:14px;">
-      <input type="hidden" name="next" value="{{ next_path or '/' }}">
-      <div class="input-group">
-        <label for="legacy-pass">Contraseña del Servidor</label>
-        <input type="password" id="legacy-pass" name="password" placeholder="Contraseña de la máquina anfitriona">
-      </div>
-      <button type="submit" class="btn-submit" style="background:var(--panel-2); color:var(--text); border:1px solid var(--border);">Acceso Rápido Local</button>
-    </form>
-  </details>
 </div>
 
 <script>
+  let pendingTempToken = "";
+  let userDevicesList = [];
+
   function getFingerprint() {
     let fp = localStorage.getItem("enlace_device_fingerprint");
     if (!fp) {
@@ -267,12 +451,44 @@
     return name;
   }
 
+  function getDeviceIcon(type, name) {
+    const n = (name || "").toLowerCase();
+    const t = (type || "").toLowerCase();
+    if (t === "mobile" || n.includes("cel") || n.includes("movil") || n.includes("phone")) return "📱";
+    if (t === "tablet" || n.includes("ipad") || n.includes("tab")) return "📟";
+    if (t === "server" || n.includes("serv")) return "🖥️";
+    return "💻";
+  }
+
+  function formatLastSeen(isoStr) {
+    if (!isoStr) return "Nunca";
+    try {
+      const d = new Date(isoStr);
+      const now = new Date();
+      const diffMs = now - d;
+      const diffMins = Math.floor(diffMs / 60000);
+      if (diffMins < 2) return "Recién conectado";
+      if (diffMins < 60) return `Hace ${diffMins} min`;
+      const diffHours = Math.floor(diffMins / 60);
+      if (diffHours < 24) return `Hace ${diffHours} h`;
+      return d.toLocaleDateString();
+    } catch {
+      return "Anteriormente";
+    }
+  }
+
+  function escapeHtml(text) {
+    if (!text) return "";
+    return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
   document.addEventListener("DOMContentLoaded", () => {
     const defaultName = autoDetectDeviceName();
-    document.getElementById("login-device").value = defaultName;
-    document.getElementById("reg-device").value = defaultName;
+    const regDev = document.getElementById("reg-device");
+    if (regDev) regDev.value = defaultName;
     if (/android|iphone|ipad/i.test(navigator.userAgent)) {
-      document.getElementById("reg-type").value = "mobile";
+      const regType = document.getElementById("reg-type");
+      if (regType) regType.value = "mobile";
     }
   });
 
@@ -297,17 +513,120 @@
     alert.style.display = "block";
   }
 
+  function selectDeviceOption(id) {
+    const isNew = id === "__new__";
+    document.querySelectorAll(".device-option-card").forEach(c => {
+      c.classList.remove("selected");
+      const r = c.querySelector('input[type="radio"]');
+      if (r) r.checked = (c.dataset.deviceId === id);
+    });
+    const targetCard = document.querySelector(`.device-option-card[data-device-id="${id}"]`);
+    if (targetCard) targetCard.classList.add("selected");
+
+    const newPanel = document.getElementById("new-device-panel");
+    if (isNew) {
+      newPanel.classList.add("active");
+      const newNameInput = document.getElementById("new-dev-name");
+      if (newNameInput) newNameInput.focus();
+    } else {
+      newPanel.classList.remove("active");
+    }
+  }
+
+  function renderDeviceSelection(data) {
+    pendingTempToken = data.temp_token || "";
+    userDevicesList = data.devices || [];
+
+    const greeting = document.getElementById("device-greeting");
+    if (greeting && data.user) {
+      greeting.textContent = `Hola, ${data.user.display_name || data.user.username} 👋`;
+    }
+
+    const container = document.getElementById("device-cards-container");
+    container.innerHTML = "";
+
+    let preselectId = data.recognized_device_id;
+    if (!preselectId && userDevicesList.length > 0) {
+      preselectId = userDevicesList[0].id;
+    }
+
+    userDevicesList.forEach(dev => {
+      const card = document.createElement("div");
+      const isSelected = dev.id === preselectId;
+      card.className = "device-option-card" + (isSelected ? " selected" : "");
+      card.dataset.deviceId = dev.id;
+      card.onclick = () => selectDeviceOption(dev.id);
+
+      const icon = getDeviceIcon(dev.device_type, dev.device_name);
+      card.innerHTML = `
+        <input type="radio" name="device_choice" value="${dev.id}" ${isSelected ? "checked" : ""}>
+        <span class="device-option-icon">${icon}</span>
+        <div class="device-option-info">
+          <div class="device-option-name">
+            ${escapeHtml(dev.device_name)}
+            ${dev.is_recognized ? '<span class="badge-tag badge-recognized">★ Reconocido</span>' : ''}
+            ${dev.is_online ? '<span class="badge-tag badge-online">● En línea</span>' : ''}
+          </div>
+          <div class="device-option-meta">
+            <span>${(dev.device_type || 'pc').toUpperCase()}</span>
+            <span>•</span>
+            <span>Visto: ${formatLastSeen(dev.last_seen_at)}</span>
+          </div>
+        </div>
+      `;
+      container.appendChild(card);
+    });
+
+    // Opción para registrar como nuevo dispositivo
+    const newCard = document.createElement("div");
+    const isNewSelected = !preselectId;
+    newCard.className = "device-option-card" + (isNewSelected ? " selected" : "");
+    newCard.dataset.deviceId = "__new__";
+    newCard.onclick = () => selectDeviceOption("__new__");
+    newCard.innerHTML = `
+      <input type="radio" name="device_choice" value="__new__" ${isNewSelected ? "checked" : ""}>
+      <span class="device-option-icon">➕</span>
+      <div class="device-option-info">
+        <div class="device-option-name">Registrar como nuevo equipo</div>
+        <div class="device-option-meta">Asignar un nombre nuevo a este dispositivo</div>
+      </div>
+    `;
+    container.appendChild(newCard);
+
+    document.getElementById("new-dev-name").value = autoDetectDeviceName();
+    if (/android|iphone|ipad/i.test(navigator.userAgent)) {
+      document.getElementById("new-dev-type").value = "mobile";
+    }
+
+    document.getElementById("auth-step-credentials").style.display = "none";
+    document.getElementById("auth-step-device").style.display = "block";
+    document.getElementById("auth-alert").style.display = "none";
+
+    if (!preselectId) {
+      selectDeviceOption("__new__");
+    }
+  }
+
+  function backToCredentials() {
+    document.getElementById("auth-step-device").style.display = "none";
+    document.getElementById("auth-step-credentials").style.display = "block";
+    document.getElementById("auth-alert").style.display = "none";
+    const btn = document.getElementById("btn-login-submit");
+    btn.disabled = false;
+    btn.textContent = "Continuar";
+  }
+
   async function handleLogin(e) {
     e.preventDefault();
     const btn = document.getElementById("btn-login-submit");
     btn.disabled = true;
     btn.textContent = "Verificando...";
+    document.getElementById("auth-alert").style.display = "none";
 
     try {
       const payload = {
         identifier: document.getElementById("login-ident").value,
         password: document.getElementById("login-pass").value,
-        device_name: document.getElementById("login-device").value,
         device_type: (/android|iphone|ipad|mobile/i.test(navigator.userAgent) ? "mobile" : "pc"),
         device_fingerprint: getFingerprint(),
       };
@@ -320,9 +639,16 @@
       if (!res.ok || !data.ok) {
         showError(data.error || "Error al iniciar sesión.");
         btn.disabled = false;
-        btn.textContent = "Entrar";
+        btn.textContent = "Continuar";
         return;
       }
+
+      if (data.require_device_selection) {
+        renderDeviceSelection(data);
+        return;
+      }
+
+      // Login directo (si no requiere selección)
       if (data.device && data.device.id) {
         localStorage.setItem("enlace_device_id", data.device.id);
         document.cookie = "enlace_device_id=" + encodeURIComponent(data.device.id) + "; path=/; max-age=31536000; SameSite=Lax";
@@ -330,12 +656,77 @@
       if (data.device && data.device.device_name) {
         localStorage.setItem("enlace_device_name", data.device.device_name);
       }
+      if (data.device && data.device.device_type) {
+        localStorage.setItem("enlace_device_type", data.device.device_type);
+      }
       const urlParams = new URLSearchParams(window.location.search);
       window.location.href = urlParams.get("next") || "/";
     } catch (err) {
       showError("Error de conexión con el servidor.");
       btn.disabled = false;
-      btn.textContent = "Entrar";
+      btn.textContent = "Continuar";
+    }
+  }
+
+  async function handleDeviceSelect(e) {
+    e.preventDefault();
+    const btn = document.getElementById("btn-device-submit");
+    btn.disabled = true;
+    btn.textContent = "Asignando dispositivo...";
+    document.getElementById("auth-alert").style.display = "none";
+
+    const checkedRadio = document.querySelector('input[name="device_choice"]:checked');
+    const selectedVal = checkedRadio ? checkedRadio.value : "";
+    const isNew = selectedVal === "__new__";
+
+    const payload = {
+      temp_token: pendingTempToken,
+      device_fingerprint: getFingerprint(),
+      remember_device: document.getElementById("remember-device-check").checked,
+    };
+
+    if (isNew) {
+      const devName = (document.getElementById("new-dev-name").value || "").trim() || autoDetectDeviceName();
+      const devType = document.getElementById("new-dev-type").value || "pc";
+      payload.new_device = {
+        device_name: devName,
+        device_type: devType,
+      };
+    } else {
+      payload.device_id = selectedVal;
+    }
+
+    try {
+      const res = await fetch("/api/auth/select-device", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        showError(data.error || "Error al asignar dispositivo.");
+        btn.disabled = false;
+        btn.textContent = "Entrar a FileDrop";
+        return;
+      }
+
+      if (data.device && data.device.id) {
+        localStorage.setItem("enlace_device_id", data.device.id);
+        document.cookie = "enlace_device_id=" + encodeURIComponent(data.device.id) + "; path=/; max-age=31536000; SameSite=Lax";
+      }
+      if (data.device && data.device.device_name) {
+        localStorage.setItem("enlace_device_name", data.device.device_name);
+      }
+      if (data.device && data.device.device_type) {
+        localStorage.setItem("enlace_device_type", data.device.device_type);
+      }
+
+      const urlParams = new URLSearchParams(window.location.search);
+      window.location.href = urlParams.get("next") || "/";
+    } catch (err) {
+      showError("Error de conexión al asignar dispositivo.");
+      btn.disabled = false;
+      btn.textContent = "Entrar a FileDrop";
     }
   }
 
@@ -372,6 +763,9 @@
       }
       if (data.device && data.device.device_name) {
         localStorage.setItem("enlace_device_name", data.device.device_name);
+      }
+      if (data.device && data.device.device_type) {
+        localStorage.setItem("enlace_device_type", data.device.device_type);
       }
       window.location.href = "/";
     } catch (err) {
