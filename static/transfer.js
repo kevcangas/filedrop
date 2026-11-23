@@ -1,6 +1,6 @@
 /*
  * Logica compartida de transferencia de archivos y portapapeles por
- * WebSocket (Socket.IO). La usan pc.js y remote.js.
+ * WebSocket (Socket.IO), HTTP (Buzon) y S3. La usa app.js (cliente unificado).
  *
  * Protocolo (eventos), totalmente simetrico entre cualquier par de
  * dispositivos (PC o celular, no importa cual sea cual):
@@ -50,9 +50,11 @@ function base64ToUint8Array(base64) {
 }
 
 function formatBytes(bytes) {
-  if (bytes < 1024) return bytes + " B";
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
-  return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+  const n = Number(bytes) || 0;
+  if (n < 1024) return n + " B";
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+  if (n < 1024 * 1024 * 1024) return (n / (1024 * 1024)).toFixed(1) + " MB";
+  return (n / (1024 * 1024 * 1024)).toFixed(2) + " GB";
 }
 
 function escapeHtml(s) {
@@ -148,7 +150,7 @@ function drawToJpegDataUrl(source, width, height) {
  * Recibe una lista de { file, relativePath } y regresa una Promise que
  * resuelve a { file: File, isBundle: bool, count: number }.
  */
-async function packageForSending(items) {
+async function packageForSending(items, onProgress) {
   if (items.length === 1) {
     return { file: items[0].file, isBundle: false, count: 1 };
   }
@@ -156,7 +158,14 @@ async function packageForSending(items) {
   for (const { file, relativePath } of items) {
     zip.file(relativePath || file.name, file);
   }
-  const blob = await zip.generateAsync({ type: "blob", compression: "STORE" });
+  const blob = await zip.generateAsync(
+    { type: "blob", compression: "STORE" },
+    (meta) => {
+      if (typeof onProgress === "function") {
+        onProgress(Math.round(meta.percent || 0));
+      }
+    }
+  );
   const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
   const zipFile = new File([blob], `envio-${stamp}.zip`, { type: "application/zip" });
   return { file: zipFile, isBundle: true, count: items.length };
@@ -294,10 +303,28 @@ function sendNextChunk(socket, fileId) {
     console.log(`[P2P] Emitting file_chunk: ${tx.chunkIndex + 1}/${tx.totalChunks} (${fileId})`);
     socket.emit("file_chunk", payload);
     if (tx.onProgress) {
-      tx.onProgress(Math.round(((tx.chunkIndex + 1) / tx.totalChunks) * 100));
+      const loadedBytes = Math.min(tx.file.size, (tx.chunkIndex + 1) * CHUNK_SIZE);
+      const pct = Math.round(((tx.chunkIndex + 1) / tx.totalChunks) * 100);
+      tx.onProgress(pct, loadedBytes, tx.file.size);
     }
   };
   reader.readAsArrayBuffer(slice);
+}
+
+function cancelOutgoingTransfer(fileId) {
+  if (outgoing[fileId]) {
+    delete outgoing[fileId];
+    return true;
+  }
+  return false;
+}
+
+function cancelIncomingTransfer(fileId) {
+  if (incoming[fileId]) {
+    delete incoming[fileId];
+    return true;
+  }
+  return false;
 }
 
 /** Debe llamarse cuando llega file_response con accept:true, para iniciar el envio. */
@@ -361,7 +388,13 @@ function handleIncomingChunk(socket, data) {
     rx.received += 1;
     console.log(`[P2P] Received chunk ${rx.received}/${rx.total} for fileId: ${fileId}`);
   }
-  if (rx.onProgress) rx.onProgress(Math.round((rx.received / rx.total) * 100));
+  if (rx.onProgress) {
+    const totalBytes = Number(rx.size) || 0;
+    const loadedBytes = totalBytes > 0
+      ? Math.min(totalBytes, rx.received >= rx.total ? totalBytes : rx.received * CHUNK_SIZE)
+      : rx.received;
+    rx.onProgress(Math.round((rx.received / rx.total) * 100), loadedBytes, totalBytes);
+  }
 
   emitAckFor(socket, rx, fileId, chunkIdx);
 
@@ -471,7 +504,7 @@ async function writeSystemClipboard(text) {
  * Sube un archivo al buzon del servidor. Devuelve el objeto XMLHttpRequest
  * por si se necesita cancelar la subida.
  */
-function uploadToBuzon(file, { targetDeviceId, fromDeviceId, fromDeviceName, isBundle, bundleCount, onProgress, onDone, onError }) {
+function uploadToBuzon(file, { targetDeviceId, fromDeviceId, fromDeviceName, isBundle, bundleCount, onProgress, onUploadSent, onDone, onError, onAbort }) {
   const xhr = new XMLHttpRequest();
   const form = new FormData();
   form.append("file", file, file.name);
@@ -485,7 +518,12 @@ function uploadToBuzon(file, { targetDeviceId, fromDeviceId, fromDeviceName, isB
 
   xhr.open("POST", "/api/buzon/enviar");
   xhr.upload.onprogress = (e) => {
-    if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100));
+    if (e.lengthComputable && onProgress) {
+      onProgress(Math.round((e.loaded / e.total) * 100), e.loaded, e.total);
+    }
+  };
+  xhr.upload.onload = () => {
+    if (onUploadSent) onUploadSent();
   };
   xhr.onload = () => {
     if (xhr.status >= 200 && xhr.status < 300) {
@@ -493,10 +531,13 @@ function uploadToBuzon(file, { targetDeviceId, fromDeviceId, fromDeviceName, isB
       try { data = JSON.parse(xhr.responseText); } catch { /* respuesta no era JSON */ }
       if (onDone) onDone(data);
     } else if (onError) {
-      onError(xhr.status);
+      let errData = null;
+      try { errData = JSON.parse(xhr.responseText); } catch { /* no json */ }
+      onError(xhr.status, errData ? errData.error : null);
     }
   };
-  xhr.onerror = () => { if (onError) onError(0); };
+  xhr.onabort = () => { if (onAbort) onAbort(); };
+  xhr.onerror = () => { if (onError) onError(0, "Error de red al conectar con el servidor."); };
   xhr.send(form);
   return xhr;
 }
@@ -537,7 +578,7 @@ function formatExpiry(expiresAtSeconds) {
  * Sube un archivo directamente a S3 dentro del prefijo y subcarpeta del usuario.
  * Devuelve el objeto XMLHttpRequest por si se necesita cancelar la subida.
  */
-function uploadToS3(file, { folder, userId, isBundle, bundleCount, onProgress, onDone, onError } = {}) {
+function uploadToS3(file, { folder, userId, isBundle, bundleCount, onProgress, onUploadSent, onDone, onError, onAbort } = {}) {
   const xhr = new XMLHttpRequest();
   const form = new FormData();
   form.append("file", file, file.name);
@@ -552,7 +593,12 @@ function uploadToS3(file, { folder, userId, isBundle, bundleCount, onProgress, o
 
   xhr.open("POST", "/api/s3/upload");
   xhr.upload.onprogress = (e) => {
-    if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100));
+    if (e.lengthComputable && onProgress) {
+      onProgress(Math.round((e.loaded / e.total) * 100), e.loaded, e.total);
+    }
+  };
+  xhr.upload.onload = () => {
+    if (onUploadSent) onUploadSent();
   };
   xhr.onload = () => {
     if (xhr.status >= 200 && xhr.status < 300) {
@@ -565,9 +611,145 @@ function uploadToS3(file, { folder, userId, isBundle, bundleCount, onProgress, o
       if (onError) onError(xhr.status, errData ? errData.error : null);
     }
   };
+  xhr.onabort = () => { if (onAbort) onAbort(); };
   xhr.onerror = () => { if (onError) onError(0, "Error de red al conectar con el servidor."); };
   xhr.send(form);
   return xhr;
+}
+
+const MAX_MEMORY_DOWNLOAD_BYTES = 300 * 1024 * 1024; // 300 MB RAM guard
+
+function triggerDirectUrlDownload(url, filename) {
+  const a = document.createElement("a");
+  a.href = url;
+  if (filename) a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+/**
+ * Descarga un archivo HTTP (S3 o Buzón) mostrando progreso en tiempo real en TransferUI.
+ * Si el archivo supera maxMemoryBytes (300 MB) o el navegador no soporta streams,
+ * cae automáticamente a descarga nativa del navegador para proteger la RAM.
+ */
+async function downloadFileWithProgress({
+  url,
+  filename = "archivo",
+  expectedSize = 0,
+  channel = "S3",
+  maxMemoryBytes = MAX_MEMORY_DOWNLOAD_BYTES,
+  toast: toastFn,
+  onComplete,
+} = {}) {
+  const notify = toastFn || (typeof window.showToast === "function" ? window.showToast : () => {});
+  const ui = typeof window !== "undefined" ? window.TransferUI : null;
+
+  if (expectedSize && Number(expectedSize) > maxMemoryBytes) {
+    notify("Archivo grande (>300 MB): descargando directamente desde el navegador…", "info");
+    triggerDirectUrlDownload(url, filename);
+    return;
+  }
+
+  const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+  let userCancelled = false;
+  let txId = null;
+
+  if (ui) {
+    txId = ui.createTransfer({
+      filename,
+      totalBytes: Number(expectedSize) || 0,
+      direction: "down",
+      channel,
+      phase: "transferring",
+      statusText: "Iniciando descarga…",
+      onCancel: () => {
+        userCancelled = true;
+        if (controller) controller.abort();
+      },
+    });
+  }
+
+  try {
+    const res = await fetch(url, {
+      credentials: "same-origin",
+      signal: controller ? controller.signal : undefined,
+    });
+
+    if (!res.ok) {
+      let errMsg = `HTTP ${res.status}`;
+      try {
+        const j = await res.json();
+        if (j && j.error) errMsg = j.error;
+      } catch { /* ignore */ }
+      throw new Error(errMsg);
+    }
+
+    const clHeader = res.headers.get("Content-Length");
+    const total = clHeader ? parseInt(clHeader, 10) : (Number(expectedSize) || 0);
+    const contentType = res.headers.get("Content-Type") || "application/octet-stream";
+
+    if (total > maxMemoryBytes) {
+      if (controller) controller.abort();
+      if (ui && txId) ui.removeTransfer(txId);
+      notify("Archivo grande (>300 MB): descargando directamente desde el navegador…", "info");
+      triggerDirectUrlDownload(url, filename);
+      return;
+    }
+
+    if (!res.body || typeof res.body.getReader !== "function") {
+      if (ui && txId) ui.setPhase(txId, "processing", "Descargando archivo…");
+      const blob = await res.blob();
+      triggerBrowserDownload(blob, filename);
+      if (ui && txId) ui.completeTransfer(txId);
+      notify(`📥 "${filename}" descargado.`, "success");
+      if (typeof onComplete === "function") onComplete();
+      return;
+    }
+
+    const reader = res.body.getReader();
+    const chunks = [];
+    let received = 0;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) {
+        chunks.push(value);
+        received += value.byteLength;
+        if (received > maxMemoryBytes) {
+          if (controller) controller.abort();
+          if (ui && txId) ui.removeTransfer(txId);
+          notify("Descarga >300 MB: cambiando a descarga nativa del navegador…", "info");
+          triggerDirectUrlDownload(url, filename);
+          return;
+        }
+        if (ui && txId) {
+          if (total > 0) {
+            ui.updateProgress(txId, received, total);
+          } else {
+            ui.setPhase(txId, "processing", `Descargando… ${formatBytes(received)}`);
+          }
+        }
+      }
+    }
+
+    const blob = new Blob(chunks, { type: contentType });
+    triggerBrowserDownload(blob, filename);
+    if (ui && txId) {
+      ui.completeTransfer(txId, { message: "Descargado" });
+    }
+    notify(`📥 "${filename}" descargado.`, "success");
+    if (typeof onComplete === "function") onComplete();
+  } catch (err) {
+    if (userCancelled || (err && err.name === "AbortError")) {
+      return;
+    }
+    if (ui && txId) {
+      ui.failTransfer(txId, err.message || "Error al descargar");
+    }
+    notify(`Error al descargar "${filename}": ${err.message || "falló la conexión"}`, "error");
+  }
 }
 
 /** Consulta el estado del servicio S3. */
@@ -730,8 +912,12 @@ async function loadS3Explorer(options = {}) {
   // 2. Renderizar migas de pan (Breadcrumbs)
   renderS3Breadcrumbs(breadcrumbsEl, options);
 
-  // 3. Cargar archivos y subcarpetas
-  filesListEl.innerHTML = '<p class="empty-hint">Cargando archivos...</p>';
+  // 3. Cargar archivos y subcarpetas (Skeleton Loader)
+  filesListEl.innerHTML = `
+    <div class="skeleton-row"></div>
+    <div class="skeleton-row"></div>
+    <div class="skeleton-row"></div>
+  `;
   const res = await fetchS3Files(s3CurrentFolder, userId);
 
   if (!res.ok) {
@@ -802,11 +988,94 @@ function updateActiveTargetFolder() {
   }
   if (typeof window !== "undefined") {
     window.s3CurrentFolder = s3CurrentFolder;
+    if (typeof window.updateTargetHint === "function") {
+      window.updateTargetHint();
+    }
   }
   const folderEl = document.getElementById("s3-current-target-folder");
   if (folderEl) {
     folderEl.textContent = s3CurrentFolder ? `/${s3CurrentFolder}` : "(raíz)";
   }
+}
+
+async function confirmDialog(opts) {
+  if (typeof window !== "undefined" && window.AppDialog && typeof window.AppDialog.confirm === "function") {
+    return window.AppDialog.confirm(opts);
+  }
+  return window.confirm(opts.message || opts.title || "¿Continuar?");
+}
+
+async function promptDialog(opts) {
+  if (typeof window !== "undefined" && window.AppDialog && typeof window.AppDialog.prompt === "function") {
+    return window.AppDialog.prompt(opts);
+  }
+  return window.prompt(opts.message || opts.title || "", opts.defaultValue || "");
+}
+
+async function openS3ShareModal(file, userId, showToast) {
+  const modal = document.getElementById("s3-share-modal");
+  const urlInput = document.getElementById("input-share-url");
+  const expirySelect = document.getElementById("share-expiry-select");
+  const expiryMeta = document.getElementById("share-expiry-meta");
+  const copyBtn = document.getElementById("btn-copy-share-url");
+  const closeBtn = document.getElementById("btn-close-share-modal");
+
+  if (!modal || !urlInput) {
+    const shareData = await getS3ShareUrl(file.key, 3600, userId);
+    if (shareData.ok && shareData.url) {
+      try {
+        await navigator.clipboard.writeText(shareData.url);
+        showToast("Enlace temporal copiado al portapapeles (expira en 1 hora).");
+      } catch {
+        await promptDialog({ title: "Compartir enlace", message: "Copia este enlace temporal:", defaultValue: shareData.url });
+      }
+    } else {
+      showToast(shareData.error || "No se pudo generar el enlace.", true);
+    }
+    return;
+  }
+
+  const refreshShareLink = async () => {
+    const ttl = expirySelect ? Number(expirySelect.value || 86400) : 86400;
+    urlInput.value = "Generando enlace…";
+    const shareData = await getS3ShareUrl(file.key, ttl, userId);
+    if (shareData.ok && shareData.url) {
+      urlInput.value = shareData.url;
+      if (expiryMeta) {
+        const label = ttl === 3600 ? "1 hora" : ttl === 604800 ? "7 días" : "24 horas";
+        expiryMeta.textContent = `Válido durante ${label} · Archivo: ${file.name || file.filename || "archivo"}`;
+      }
+    } else {
+      urlInput.value = "";
+      showToast(shareData.error || "No se pudo generar el enlace.", true);
+    }
+  };
+
+  if (expirySelect) {
+    expirySelect.onchange = refreshShareLink;
+  }
+  if (copyBtn) {
+    copyBtn.onclick = async () => {
+      if (!urlInput.value) return;
+      try {
+        await navigator.clipboard.writeText(urlInput.value);
+        showToast("Enlace temporal copiado al portapapeles.", "success");
+      } catch {
+        urlInput.select();
+        document.execCommand("copy");
+        showToast("Enlace copiado.", "success");
+      }
+    };
+  }
+  if (closeBtn) {
+    closeBtn.onclick = () => { modal.style.display = "none"; };
+  }
+  modal.onclick = (e) => {
+    if (e.target === modal) modal.style.display = "none";
+  };
+
+  modal.style.display = "flex";
+  await refreshShareLink();
 }
 
 function renderS3Content(filterQuery = "", options = {}) {
@@ -866,7 +1135,12 @@ function renderS3Content(filterQuery = "", options = {}) {
             showToast("Ruta de carpeta no válida.", true);
             return;
           }
-          if (!confirm(`¿Eliminar la carpeta "${folder.name}" y todos los archivos dentro de ella en S3?`)) return;
+          if (!(await confirmDialog({
+            title: "Eliminar carpeta S3",
+            message: `¿Eliminar la carpeta "${folder.name}" y todos los archivos dentro de ella en S3?`,
+            confirmText: "Eliminar",
+            danger: true,
+          }))) return;
           const res = await deleteS3Folder(targetPath, userId);
           if (res.ok) {
             showToast(`Carpeta "${folder.name}" eliminada.`);
@@ -892,12 +1166,24 @@ function renderS3Content(filterQuery = "", options = {}) {
     };
   });
 
-  const filteredFiles = normalizedFiles.filter((f) => !q || (f.name && f.name.toLowerCase().includes(q)));
+  const sortSelect = document.getElementById("s3-sort-select");
+  const sortMode = sortSelect ? sortSelect.value : "name-asc";
+  const filteredFiles = normalizedFiles
+    .filter((f) => !q || (f.name && f.name.toLowerCase().includes(q)))
+    .sort((a, b) => {
+      if (sortMode === "name-desc") return (b.name || "").localeCompare(a.name || "");
+      if (sortMode === "size-desc") return (Number(b.size) || 0) - (Number(a.size) || 0);
+      if (sortMode === "date-desc") {
+        return new Date(b.last_modified || 0).getTime() - new Date(a.last_modified || 0).getTime();
+      }
+      return (a.name || "").localeCompare(b.name || "");
+    });
+
   if (filesListEl) {
     filesListEl.innerHTML = "";
     if (filteredFiles.length === 0) {
       if (filteredFolders.length === 0) {
-        filesListEl.innerHTML = '<p class="empty-hint">Esta carpeta está vacía. Suelta o sube archivos eligiendo "Almacenar en S3".</p>';
+        filesListEl.innerHTML = '<p class="empty-hint">Esta carpeta está vacía. Arrastra archivos aquí o pulsa "Subir a S3".</p>';
       }
       return;
     }
@@ -920,31 +1206,34 @@ function renderS3Content(filterQuery = "", options = {}) {
           </div>
         </div>
         <div class="s3-actions">
-          <button class="s3-action-btn btn-s3-preview" title="Vista previa">👁️ Ver</button>
-          <a href="/api/s3/download/${encodeURIComponent(file.key)}?stream=1" download="${escapeHtml(fileName)}" class="s3-action-btn button" style="text-decoration:none; display:inline-flex; align-items:center;" title="Descargar">📥</a>
-          <button class="s3-action-btn btn-s3-share" title="Copiar enlace prefirmado">🔗</button>
-          <button class="danger s3-action-btn btn-s3-del" title="Eliminar de S3">🗑️</button>
+          <button type="button" class="s3-action-btn btn-s3-preview" title="Vista previa">👁️ Ver</button>
+          <button type="button" class="s3-action-btn btn-s3-download" title="Descargar con barra de progreso">📥</button>
+          <button type="button" class="s3-action-btn btn-s3-share" title="Compartir enlace temporal">🔗</button>
+          <button type="button" class="danger s3-action-btn btn-s3-del" title="Eliminar de S3">🗑️</button>
         </div>
       `;
 
       row.querySelector(".btn-s3-preview").onclick = () => openS3Preview(file, userId);
 
-      row.querySelector(".btn-s3-share").onclick = async () => {
-        const shareData = await getS3ShareUrl(file.key, 3600, userId);
-        if (shareData.ok && shareData.url) {
-          try {
-            await navigator.clipboard.writeText(shareData.url);
-            showToast("Enlace temporal copiado al portapapeles (expira en 1 hora).");
-          } catch {
-            prompt("Copia este enlace temporal para compartir:", shareData.url);
-          }
-        } else {
-          showToast(shareData.error || "No se pudo generar el enlace.", true);
-        }
+      row.querySelector(".btn-s3-download").onclick = () => {
+        downloadFileWithProgress({
+          url: `/api/s3/download/${encodeURIComponent(file.key)}?stream=1&download=1`,
+          filename: fileName,
+          expectedSize: Number(file.size) || 0,
+          channel: "S3",
+          toast: showToast,
+        });
       };
 
+      row.querySelector(".btn-s3-share").onclick = () => openS3ShareModal(file, userId, showToast);
+
       row.querySelector(".btn-s3-del").onclick = async () => {
-        if (!confirm(`¿Eliminar "${fileName}" permanentemente de S3?`)) return;
+        if (!(await confirmDialog({
+          title: "Eliminar archivo S3",
+          message: `¿Eliminar "${fileName}" permanentemente de S3?`,
+          confirmText: "Eliminar",
+          danger: true,
+        }))) return;
         const delRes = await deleteS3File(file.key, userId);
         if (delRes.ok) {
           showToast(`Archivo "${fileName}" eliminado de S3.`);
@@ -978,20 +1267,16 @@ async function openS3Preview(file, userId) {
   modal.style.display = "flex";
 
   dlBtn.onclick = () => {
-    window.location.href = `/api/s3/download/${encodeURIComponent(file.key)}?stream=1`;
+    downloadFileWithProgress({
+      url: `/api/s3/download/${encodeURIComponent(file.key)}?stream=1&download=1`,
+      filename: fileName,
+      expectedSize: Number(file.size) || 0,
+      channel: "S3",
+      toast: showToast,
+    });
   };
 
-  shareBtn.onclick = async () => {
-    const shareData = await getS3ShareUrl(file.key, 3600, userId);
-    if (shareData.ok && shareData.url) {
-      try {
-        await navigator.clipboard.writeText(shareData.url);
-        showToast("Enlace temporal copiado al portapapeles.");
-      } catch {
-        prompt("Copia este enlace:", shareData.url);
-      }
-    }
-  };
+  shareBtn.onclick = () => openS3ShareModal(file, userId, showToast);
 
   closeBtn.onclick = () => { modal.style.display = "none"; };
   modal.onclick = (e) => { if (e.target === modal) modal.style.display = "none"; };
@@ -1044,12 +1329,39 @@ function setupS3ExplorerEvents(options = {}) {
   const showToast = options.toast || (typeof toast === "function" ? toast : console.log);
 
   const searchInput = document.getElementById("s3-search-input");
+  const btnSearchClear = document.getElementById("btn-s3-search-clear");
+  const sortSelect = document.getElementById("s3-sort-select");
   const btnRefresh = document.getElementById("btn-s3-refresh");
   const btnNewFolder = document.getElementById("btn-s3-new-folder");
+  const btnFolderUpload = document.getElementById("btn-s3-folder-upload");
+  const folderInput = document.getElementById("s3-folder-input");
+  const s3DropArea = document.getElementById("s3-drop-area");
+
+  const syncClearVisibility = () => {
+    if (btnSearchClear && searchInput) {
+      btnSearchClear.style.display = searchInput.value ? "inline-flex" : "none";
+    }
+  };
 
   if (searchInput) {
     searchInput.addEventListener("input", (e) => {
+      syncClearVisibility();
       renderS3Content(e.target.value, options);
+    });
+  }
+
+  if (btnSearchClear && searchInput) {
+    btnSearchClear.addEventListener("click", () => {
+      searchInput.value = "";
+      syncClearVisibility();
+      renderS3Content("", options);
+      searchInput.focus();
+    });
+  }
+
+  if (sortSelect) {
+    sortSelect.addEventListener("change", () => {
+      renderS3Content(searchInput ? searchInput.value : "", options);
     });
   }
 
@@ -1062,7 +1374,12 @@ function setupS3ExplorerEvents(options = {}) {
 
   if (btnNewFolder) {
     btnNewFolder.addEventListener("click", async () => {
-      const name = prompt("Nombre de la nueva carpeta:");
+      const name = await promptDialog({
+        title: "Nueva carpeta en S3",
+        message: "Ingresa el nombre de la carpeta:",
+        placeholder: "Ej: Documentos, Fotos 2026",
+        confirmText: "Crear carpeta",
+      });
       if (!name || !name.trim()) return;
       const cleanName = name.trim().replace(/[\/\\]/g, "");
       if (!cleanName) return;
@@ -1073,6 +1390,45 @@ function setupS3ExplorerEvents(options = {}) {
         loadS3Explorer(options);
       } else {
         showToast(res.error || "No se pudo crear la carpeta.", true);
+      }
+    });
+  }
+
+  if (btnFolderUpload && folderInput) {
+    btnFolderUpload.addEventListener("click", () => folderInput.click());
+    folderInput.addEventListener("change", () => {
+      if (folderInput.files.length && typeof window.uploadFilesToS3 === "function") {
+        const picked = Array.from(folderInput.files);
+        folderInput.value = "";
+        window.uploadFilesToS3(picked);
+      }
+    });
+  }
+
+  if (s3DropArea) {
+    let dragDepth = 0;
+    s3DropArea.addEventListener("dragenter", (e) => {
+      e.preventDefault();
+      dragDepth += 1;
+      s3DropArea.classList.add("drop-active");
+    });
+    s3DropArea.addEventListener("dragover", (e) => {
+      e.preventDefault();
+    });
+    s3DropArea.addEventListener("dragleave", (e) => {
+      e.preventDefault();
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (dragDepth === 0) s3DropArea.classList.remove("drop-active");
+    });
+    s3DropArea.addEventListener("drop", async (e) => {
+      e.preventDefault();
+      dragDepth = 0;
+      s3DropArea.classList.remove("drop-active");
+      if (!e.dataTransfer || typeof window.uploadFilesToS3 !== "function") return;
+      const items = await itemsFromDataTransfer(e.dataTransfer);
+      const files = items.map((i) => i.file).filter(Boolean);
+      if (files.length > 0) {
+        window.uploadFilesToS3(files);
       }
     });
   }
@@ -1092,8 +1448,11 @@ if (typeof window !== "undefined") {
   window.handleAckReceived = handleAckReceived;
   window.prepareIncoming = prepareIncoming;
   window.handleIncomingChunk = handleIncomingChunk;
+  window.cancelOutgoingTransfer = cancelOutgoingTransfer;
+  window.cancelIncomingTransfer = cancelIncomingTransfer;
   window.triggerBrowserDownload = triggerBrowserDownload;
   window.triggerDownload = triggerBrowserDownload;
+  window.downloadFileWithProgress = downloadFileWithProgress;
   window.filesToItems = filesToItems;
   window.packageForSending = packageForSending;
   window.resumeActiveTransfers = resumeActiveTransfers;
@@ -1110,6 +1469,8 @@ if (typeof window !== "undefined") {
   window.deleteS3Folder = deleteS3Folder;
   window.deleteS3File = deleteS3File;
   window.itemsFromDataTransfer = itemsFromDataTransfer;
+  window.formatBytes = formatBytes;
+  window.formatExpiry = formatExpiry;
   window.getS3CurrentFolder = () => s3CurrentFolder;
   window.setS3CurrentFolder = (f) => { s3CurrentFolder = f; };
   Object.defineProperty(window, "s3CurrentFolder", {

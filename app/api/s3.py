@@ -157,6 +157,7 @@ def s3_download(key):
 
     user_id = request.args.get("user_id") or get_effective_user_id()
     stream_requested = request.args.get("stream", "1").strip().lower() in ("1", "true", "yes")
+    download_requested = request.args.get("download", "0").strip().lower() in ("1", "true", "yes")
 
     try:
         if stream_requested:
@@ -178,11 +179,12 @@ def s3_download(key):
                         break
                     yield chunk
 
+            disposition = "attachment" if download_requested else "inline"
             headers = {
                 "Content-Type": content_type,
-                "Content-Disposition": f'inline; filename="{display_name}"',
+                "Content-Disposition": f'{disposition}; filename="{display_name}"',
             }
-            if content_length:
+            if content_length is not None:
                 headers["Content-Length"] = str(content_length)
 
             return Response(stream_with_context(generate()), headers=headers)

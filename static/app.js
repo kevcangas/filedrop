@@ -71,54 +71,80 @@
     return div.innerHTML;
   }
 
-  function toast(text, isWarn = false) {
+  function toast(text, typeOrWarn = false) {
     const container = document.getElementById("toasts");
     if (!container) return;
+    let level = "success";
+    if (typeOrWarn === true || typeOrWarn === "error") level = "error";
+    else if (typeOrWarn === "warn") level = "warn";
+    else if (typeOrWarn === "info") level = "info";
+    else if (typeOrWarn === "success") level = "success";
+
     const el = document.createElement("div");
-    el.className = "toast" + (isWarn ? " warn" : "");
-    el.textContent = text;
-    container.appendChild(el);
-    setTimeout(() => {
+    el.className = `toast ${level}${level === "error" || level === "warn" ? " warn" : ""}`;
+    el.innerHTML = `
+      <span class="toast-msg">${escapeHtml(text)}</span>
+      <button type="button" class="toast-close" aria-label="Cerrar notificación">✕</button>
+    `;
+    const dismiss = () => {
       el.style.opacity = "0";
-      setTimeout(() => el.remove(), 400);
-    }, 4500);
+      el.style.transform = "translateY(-4px)";
+      setTimeout(() => el.remove(), 250);
+    };
+    el.querySelector(".toast-close")?.addEventListener("click", dismiss);
+    container.appendChild(el);
+    setTimeout(dismiss, 4500);
   }
+  window.showToast = toast;
 
   function getDeviceIcon(type) {
     return type === "pc" ? "💻" : "📱";
   }
 
   // --- Gestión de Pestañas Responsivas -----------------------------------------
+  function switchToTab(targetTab) {
+    const tabButtons = document.querySelectorAll(".page-tabs .tab-btn");
+    const targetBtn = document.querySelector(`.page-tabs .tab-btn[data-tab="${targetTab}"]`);
+    if (!targetBtn) return;
+
+    tabButtons.forEach((b) => {
+      b.classList.remove("active", "primary");
+      b.setAttribute("aria-selected", "false");
+    });
+    targetBtn.classList.add("active", "primary");
+    targetBtn.setAttribute("aria-selected", "true");
+
+    document.querySelectorAll(".tab-content-panel").forEach((panel) => {
+      panel.style.display = "none";
+      panel.classList.remove("active");
+    });
+
+    const activePanel = document.getElementById(`tab-content-${targetTab}`);
+    if (activePanel) {
+      activePanel.style.display = "block";
+      activePanel.classList.add("active");
+    }
+
+    if (targetTab === "s3" && typeof window.loadS3Explorer === "function") {
+      window.loadS3Explorer({ getUserId: () => myUserId, toast: toast });
+    } else if (targetTab === "buzon") {
+      refreshBuzon();
+    } else if (targetTab === "friends" && typeof window.loadFriendsList === "function") {
+      window.loadFriendsList();
+    } else if (targetTab === "logs" && typeof window.loadActivityLogs === "function") {
+      window.loadActivityLogs();
+    } else if (targetTab === "config") {
+      loadConnectionQR();
+      loadEnrolledDevices();
+    }
+  }
+  window.switchToTab = switchToTab;
+
   function setupTabs() {
     const tabButtons = document.querySelectorAll(".page-tabs .tab-btn");
     tabButtons.forEach((btn) => {
       btn.addEventListener("click", () => {
-        const targetTab = btn.dataset.tab;
-        tabButtons.forEach((b) => b.classList.remove("active", "primary"));
-        btn.classList.add("active", "primary");
-
-        document.querySelectorAll(".tab-content-panel").forEach((panel) => {
-          panel.style.display = "none";
-          panel.classList.remove("active");
-        });
-
-        const activePanel = document.getElementById(`tab-content-${targetTab}`);
-        if (activePanel) {
-          activePanel.style.display = "block";
-          activePanel.classList.add("active");
-        }
-
-        // Acciones específicas al activar pestañas
-        if (targetTab === "s3" && typeof window.loadS3Explorer === "function") {
-          window.loadS3Explorer({ getUserId: () => myUserId, toast: toast });
-        } else if (targetTab === "buzon") {
-          refreshBuzon();
-        } else if (targetTab === "friends" && typeof window.loadFriendsList === "function") {
-          window.loadFriendsList();
-        } else if (targetTab === "config") {
-          loadConnectionQR();
-          loadEnrolledDevices();
-        }
+        switchToTab(btn.dataset.tab);
       });
     });
   }
@@ -127,8 +153,26 @@
   function updateTargetHint() {
     const hint = document.getElementById("active-target-hint");
     if (!hint) return;
+    const destRadio = document.querySelector('input[name="dest-target"]:checked');
+    const destChannel = destRadio ? destRadio.value : "device";
+
     const visibleDevs = devices.filter((d) => d.device_id !== myDeviceId);
     const onlineDevs = visibleDevs.filter((d) => d.is_online);
+
+    if (destChannel === "s3") {
+      const folder = typeof window.s3CurrentFolder === "string" && window.s3CurrentFolder ? `/${window.s3CurrentFolder}` : "/raíz";
+      hint.textContent = `Destino: ☁️ S3 (${folder})`;
+      hint.className = "active-target-badge s3";
+      return;
+    }
+
+    if (destChannel === "buzon") {
+      const target = visibleDevs.find((d) => d.device_id === selectedDeviceId);
+      const label = selectedDeviceId === GLOBAL_TARGET_ID ? "🌐 Global" : (target ? target.device_name : "Global");
+      hint.textContent = `Destino: 📥 Buzón (${label})`;
+      hint.className = "active-target-badge buzon";
+      return;
+    }
 
     if (selectedDeviceId === GLOBAL_TARGET_ID) {
       hint.textContent = `Destino: 🌐 Global (${onlineDevs.length} en línea)`;
@@ -149,6 +193,7 @@
       }
     }
   }
+  window.updateTargetHint = updateTargetHint;
 
   function formatRelativeTime(isoString) {
     if (!isoString) return "";
@@ -213,6 +258,12 @@
       selectedDeviceId = GLOBAL_TARGET_ID;
       renderDevices();
     };
+    globalRow.onkeydown = (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        globalRow.click();
+      }
+    };
     list.appendChild(globalRow);
 
     // Filas individuales por dispositivo par (en línea primero)
@@ -249,6 +300,12 @@
         selectedDeviceId = d.device_id;
         renderDevices();
       };
+      row.onkeydown = (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          row.click();
+        }
+      };
       list.appendChild(row);
     });
 
@@ -279,6 +336,7 @@
       console.warn("Could not fetch visible devices via REST", err);
     }
   }
+  window.refreshVisibleDevices = fetchVisibleDevices;
 
   // --- Handlers de Socket.IO y Presencia ----------------------------------------
   function setupSocketListeners() {
@@ -296,6 +354,9 @@
         device_fingerprint: getDeviceFingerprint(),
       });
       fetchVisibleDevices();
+      if (typeof window.resumeActiveTransfers === "function") {
+        window.resumeActiveTransfers(socket);
+      }
     });
 
     socket.on("disconnect", () => {
@@ -446,10 +507,12 @@
     const senderName = offer.sender_device_name || offer._from_device_name || "Un dispositivo";
 
     if (isOwn) {
-      // Auto-recepción directa entre dispositivos propios (igual de fluido que la versión original)
+      // Auto-recepción directa entre dispositivos propios
       const totalChunks = Math.ceil(fileSize / (64 * 1024)) || 1;
-      const rowId = addTransferRow(fileName, fileSize, "down");
-      toast(`📥 Recibiendo "${fileName}" de ${senderName}…`);
+      const rowId = addTransferRow(fileName, fileSize, "down", "P2P", () => {
+        if (typeof window.cancelIncomingTransfer === "function") window.cancelIncomingTransfer(fileId);
+      });
+      toast(`📥 Recibiendo "${fileName}" de ${senderName}…`, "info");
 
       if (typeof window.prepareIncoming === "function") {
         window.prepareIncoming(fileId, {
@@ -458,9 +521,9 @@
           mimetype: fileType,
           totalChunks: totalChunks,
           fromDeviceId: fromDevId,
-          onProgress: (pct) => updateTransferProgress(rowId, pct / 100),
+          onProgress: (pct, loaded, total) => updateTransferProgress(rowId, loaded != null ? loaded : pct, total || fileSize),
           onComplete: (blob, downloadFilename) => {
-            finishTransferRow(rowId, true);
+            finishTransferRow(rowId, true, `De ${senderName}`);
             if (typeof window.triggerBrowserDownload === "function") {
               window.triggerBrowserDownload(blob, downloadFilename || fileName);
             }
@@ -521,7 +584,9 @@
       const totalChunks = Math.ceil(fileSize / (64 * 1024)) || 1;
 
       // Registrar fila de transferencia entrante
-      const rowId = addTransferRow(fileName, fileSize, "down");
+      const rowId = addTransferRow(fileName, fileSize, "down", "P2P", () => {
+        if (typeof window.cancelIncomingTransfer === "function") window.cancelIncomingTransfer(fileId);
+      });
       if (typeof window.prepareIncoming === "function") {
         window.prepareIncoming(fileId, {
           filename: fileName,
@@ -529,7 +594,7 @@
           mimetype: fileType,
           totalChunks: totalChunks,
           fromDeviceId: fromDevId,
-          onProgress: (pct) => updateTransferProgress(rowId, pct / 100),
+          onProgress: (pct, loaded, total) => updateTransferProgress(rowId, loaded != null ? loaded : pct, total || fileSize),
           onComplete: (blob, downloadFilename) => {
             finishTransferRow(rowId, true);
             if (typeof window.triggerBrowserDownload === "function") {
@@ -579,47 +644,36 @@
     }
   }
 
-  // --- Filas de Transferencia en DOM -------------------------------------------
-  let transferSeq = 0;
-  function addTransferRow(filename, filesize, direction = "up") {
-    const list = document.getElementById("transfer-list");
-    if (!list) return null;
-    const emptyHint = list.querySelector(".empty-hint");
-    if (emptyHint) emptyHint.remove();
-
-    transferSeq++;
-    const rowId = `tx-row-${transferSeq}`;
-    const row = document.createElement("div");
-    row.id = rowId;
-    row.className = "transfer-row";
-    row.innerHTML = `
-      <div class="spread" style="margin-bottom:4px;">
-        <span class="tx-name">${direction === "up" ? "⬆️" : "⬇️"} ${escapeHtml(filename)}</span>
-        <span class="tx-meta" id="${rowId}-status">0% · ${formatBytes(filesize)}</span>
-      </div>
-      <div class="progress-bar-bg">
-        <div class="progress-bar-fill" id="${rowId}-fill" style="width: 0%;"></div>
-      </div>
-    `;
-    list.prepend(row);
-    return rowId;
+  // --- Filas de Transferencia unificadas (TransferUI) --------------------------
+  function addTransferRow(filename, filesize, direction = "up", channel = "P2P", onCancel = null, phase = "transferring", statusText = "") {
+    if (window.TransferUI) {
+      return window.TransferUI.createTransfer({
+        filename,
+        totalBytes: filesize,
+        direction,
+        channel,
+        phase,
+        statusText,
+        onCancel,
+      });
+    }
+    return null;
   }
 
-  function updateTransferProgress(rowId, progressValue) {
-    const pct = progressValue > 1 ? Math.min(100, Math.round(progressValue)) : Math.min(100, Math.round(progressValue * 100));
-    const fill = document.getElementById(`${rowId}-fill`);
-    const status = document.getElementById(`${rowId}-status`);
-    if (fill) fill.style.width = `${pct}%`;
-    if (status) status.textContent = `${pct}%`;
+  function updateTransferProgress(rowId, loadedOrPct, totalBytes) {
+    if (window.TransferUI && rowId) {
+      window.TransferUI.updateProgress(rowId, loadedOrPct, totalBytes);
+    }
   }
 
-  function finishTransferRow(rowId, success = true) {
-    const status = document.getElementById(`${rowId}-status`);
-    const fill = document.getElementById(`${rowId}-fill`);
-    if (status) status.textContent = success ? "✓ Completado" : "✗ Error";
-    if (fill && success) {
-      fill.style.width = "100%";
-      fill.classList.add("success");
+  function finishTransferRow(rowId, success = true, msgOrOpts = "") {
+    if (!window.TransferUI || !rowId) return;
+    if (success) {
+      const opts = typeof msgOrOpts === "object" && msgOrOpts !== null ? msgOrOpts : { message: msgOrOpts || "Completado" };
+      window.TransferUI.completeTransfer(rowId, opts);
+    } else {
+      const errMsg = typeof msgOrOpts === "string" ? msgOrOpts : "Error en transferencia";
+      window.TransferUI.failTransfer(rowId, errMsg);
     }
   }
 
@@ -640,27 +694,24 @@
 
   async function sendFilesP2P(filesList) {
     if (!socket || !socket.connected) {
-      toast("Reconectando comunicación en tiempo real…", true);
+      toast("Reconectando comunicación en tiempo real…", "warn");
       if (socket) socket.connect();
       return;
     }
 
     const otherDevs = devices.filter((d) => d.device_id !== myDeviceId);
     if (otherDevs.length === 0) {
-      toast("No hay otros dispositivos conectados.", true);
+      toast("No hay otros dispositivos conectados.", "warn");
       return;
     }
 
-    const items = typeof window.filesToItems === "function" ? window.filesToItems(filesList) : Array.from(filesList).map((f) => ({ file: f, relativePath: f.name }));
-    const bundle = typeof window.packageForSending === "function" ? await window.packageForSending(items) : { file: items[0].file, isBundle: false, count: 1 };
-
     const activeTargets = (selectedDeviceId === GLOBAL_TARGET_ID
       ? otherDevs.filter((d) => d.is_online)
-      : otherDevs.filter((d) => d.device_id === selectedDeviceId)
+      : otherDevs.filter((d) => d.device_id === selectedDeviceId && d.is_online)
     ).map((d) => d.device_id);
 
     if (activeTargets.length === 0) {
-      toast("El dispositivo no tiene WebSocket activo en este momento. Cambiando a Buzón…", true);
+      toast("El dispositivo no tiene WebSocket activo en este momento. Cambiando a Buzón…", "warn");
       const destBuzon = document.getElementById("dest-buzon");
       if (destBuzon) {
         destBuzon.checked = true;
@@ -669,87 +720,185 @@
       return;
     }
 
+    const items = typeof window.filesToItems === "function"
+      ? window.filesToItems(filesList)
+      : Array.from(filesList).map((f) => ({ file: f, relativePath: f.name }));
+
+    let zipTxId = null;
+    if (items.length > 1 && window.TransferUI) {
+      zipTxId = window.TransferUI.createTransfer({
+        filename: `Empaquetando ${items.length} archivos…`,
+        totalBytes: 0,
+        direction: "up",
+        channel: "P2P",
+        phase: "zipping",
+        statusText: "Creando archivo ZIP…",
+      });
+    }
+
+    let bundle;
+    try {
+      bundle = typeof window.packageForSending === "function"
+        ? await window.packageForSending(items, (pct) => {
+            if (zipTxId && window.TransferUI) {
+              window.TransferUI.setPhase(zipTxId, "zipping", `Empaquetando ZIP… ${pct}%`, pct);
+            }
+          })
+        : { file: items[0].file, isBundle: false, count: 1 };
+    } finally {
+      if (zipTxId && window.TransferUI) {
+        window.TransferUI.removeTransfer(zipTxId);
+      }
+    }
+
     activeTargets.forEach((targetDevId) => {
-      const rowId = addTransferRow(bundle.file.name, bundle.file.size, "up");
+      const targetDev = otherDevs.find((d) => d.device_id === targetDevId);
+      const targetLabel = targetDev ? targetDev.device_name : "Dispositivo";
+      const rowId = addTransferRow(bundle.file.name, bundle.file.size, "up", "P2P", null, "transferring", `Esperando a ${targetLabel}…`);
       console.log("[P2P] Offering file to target:", targetDevId, "file:", bundle.file.name, "size:", bundle.file.size);
-      toast(`📤 Enviando "${bundle.file.name}"…`);
+      toast(`📤 Enviando "${bundle.file.name}" a ${targetLabel}…`, "info");
+
       if (typeof window.offerFile === "function") {
-        window.offerFile(socket, bundle.file, {
+        const fileId = window.offerFile(socket, bundle.file, {
           targetDeviceId: targetDevId,
           fromDeviceId: myDeviceId,
           fromDeviceName: myDeviceName,
           isBundle: bundle.isBundle,
           bundleCount: bundle.count,
-          onProgress: (p) => updateTransferProgress(rowId, p / 100),
+          onProgress: (pct, loaded, total) => updateTransferProgress(rowId, loaded != null ? loaded : pct, total || bundle.file.size),
           onDone: () => {
-            finishTransferRow(rowId, true);
+            finishTransferRow(rowId, true, `Enviado a ${targetLabel}`);
             toast(`✓ "${bundle.file.name}" enviado con éxito.`);
           },
           onRejected: () => {
-            finishTransferRow(rowId, false);
-            toast("✗ Transferencia rechazada.", true);
+            finishTransferRow(rowId, false, "Rechazado por el destinatario");
+            toast("✗ Transferencia rechazada.", "error");
           },
         });
+        if (rowId && window.TransferUI) {
+          window.TransferUI.setCancelHandler(rowId, () => {
+            if (typeof window.cancelOutgoingTransfer === "function") window.cancelOutgoingTransfer(fileId);
+          });
+        }
       } else {
-        toast("Error interno: módulo de transferencia P2P no disponible.", true);
+        finishTransferRow(rowId, false, "Módulo P2P no disponible");
+        toast("Error interno: módulo de transferencia P2P no disponible.", "error");
       }
     });
   }
 
   async function uploadFilesToS3(filesList) {
+    let successCount = 0;
+    const isS3TabActive = () => document.getElementById("tab-btn-s3")?.classList.contains("active");
+
     for (const file of filesList) {
-      const rowId = addTransferRow(file.name, file.size, "up");
+      let aborted = false;
+      const rowId = addTransferRow(file.name, file.size, "up", "S3");
       try {
         if (typeof window.uploadToS3 === "function") {
           await new Promise((resolve, reject) => {
-            window.uploadToS3(file, {
+            const xhr = window.uploadToS3(file, {
               userId: myUserId,
-              folder: typeof window.s3CurrentFolder !== "undefined" ? window.s3CurrentFolder : (typeof s3CurrentFolder !== "undefined" ? s3CurrentFolder : ""),
-              onProgress: (p) => updateTransferProgress(rowId, p),
+              folder: typeof window.s3CurrentFolder !== "undefined" ? window.s3CurrentFolder : "",
+              onProgress: (pct, loaded, total) => updateTransferProgress(rowId, loaded != null ? loaded : pct, total || file.size),
+              onUploadSent: () => {
+                if (rowId && window.TransferUI) {
+                  window.TransferUI.setPhase(rowId, "processing", "Guardando en bucket S3…", 100);
+                }
+              },
+              onAbort: () => {
+                aborted = true;
+                resolve({ aborted: true });
+              },
               onDone: (res) => resolve(res),
               onError: (status, err) => reject(new Error(err || `HTTP ${status}`)),
             });
+            if (rowId && window.TransferUI && xhr) {
+              window.TransferUI.setCancelHandler(rowId, () => xhr.abort());
+            }
           });
-          finishTransferRow(rowId, true);
+          if (!aborted) {
+            successCount += 1;
+            finishTransferRow(rowId, true, {
+              message: "Subido a S3",
+              actionLabel: isS3TabActive() ? null : "Ver en S3",
+              onAction: isS3TabActive() ? null : () => switchToTab("s3"),
+            });
+          }
         } else {
           throw new Error("Módulo de subida S3 no inicializado.");
         }
       } catch (err) {
-        finishTransferRow(rowId, false);
-        toast(`Error al subir ${file.name} a S3: ${err.message}`, true);
+        if (!aborted) {
+          finishTransferRow(rowId, false, err.message);
+          toast(`Error al subir ${file.name} a S3: ${err.message}`, "error");
+        }
       }
     }
-    toast("Subida a S3 finalizada.");
-    if (typeof window.refreshS3FilesList === "function") window.refreshS3FilesList();
+
+    if (successCount > 0) {
+      toast(successCount === 1 ? "Archivo subido a S3." : `${successCount} archivos subidos a S3.`);
+      if (typeof window.refreshS3FilesList === "function") window.refreshS3FilesList();
+    }
   }
+  window.uploadFilesToS3 = uploadFilesToS3;
 
   async function uploadFilesToBuzon(filesList) {
+    let successCount = 0;
+    const isBuzonTabActive = () => document.getElementById("tab-btn-buzon")?.classList.contains("active");
+
     for (const file of filesList) {
-      const rowId = addTransferRow(file.name, file.size, "up");
+      let aborted = false;
+      const rowId = addTransferRow(file.name, file.size, "up", "Buzón");
       try {
         if (typeof window.uploadToBuzon === "function") {
           await new Promise((resolve, reject) => {
-            window.uploadToBuzon(file, {
+            const xhr = window.uploadToBuzon(file, {
               targetDeviceId: selectedDeviceId,
               fromDeviceId: myDeviceId,
               fromDeviceName: myDeviceName,
-              onProgress: (p) => updateTransferProgress(rowId, p),
+              onProgress: (pct, loaded, total) => updateTransferProgress(rowId, loaded != null ? loaded : pct, total || file.size),
+              onUploadSent: () => {
+                if (rowId && window.TransferUI) {
+                  window.TransferUI.setPhase(rowId, "processing", "Guardando en buzón…", 100);
+                }
+              },
+              onAbort: () => {
+                aborted = true;
+                resolve({ aborted: true });
+              },
               onDone: (res) => resolve(res),
               onError: (status, err) => reject(new Error(err || `HTTP ${status}`)),
             });
+            if (rowId && window.TransferUI && xhr) {
+              window.TransferUI.setCancelHandler(rowId, () => xhr.abort());
+            }
           });
-          finishTransferRow(rowId, true);
+          if (!aborted) {
+            successCount += 1;
+            finishTransferRow(rowId, true, {
+              message: "En buzón",
+              actionLabel: isBuzonTabActive() ? null : "Ver en Buzón",
+              onAction: isBuzonTabActive() ? null : () => switchToTab("buzon"),
+            });
+          }
         } else {
           throw new Error("Módulo de buzón no inicializado.");
         }
       } catch (err) {
-        finishTransferRow(rowId, false);
-        toast(`Error al depositar en buzón: ${err.message}`, true);
+        if (!aborted) {
+          finishTransferRow(rowId, false, err.message);
+          toast(`Error al depositar en buzón: ${err.message}`, "error");
+        }
       }
     }
-    toast("Archivo(s) depositados en el buzón.");
-    refreshBuzon();
+
+    if (successCount > 0) {
+      toast(successCount === 1 ? "Archivo depositado en el buzón." : `${successCount} archivos depositados en el buzón.`);
+      refreshBuzon();
+    }
   }
+  window.uploadFilesToBuzon = uploadFilesToBuzon;
 
   // --- Handlers de Drag & Drop y Selectores de Archivos ------------------------
   function setupDropzone() {
@@ -761,14 +910,32 @@
     if (!dz) return;
 
     dz.addEventListener("click", () => fileInput.click());
+    dz.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        fileInput.click();
+      }
+    });
     if (btnPickFolder) btnPickFolder.addEventListener("click", () => folderInput.click());
 
     fileInput.addEventListener("change", () => {
-      if (fileInput.files.length) dispatchFiles(fileInput.files);
+      if (fileInput.files.length) {
+        const picked = Array.from(fileInput.files);
+        fileInput.value = "";
+        dispatchFiles(picked);
+      }
     });
 
     folderInput.addEventListener("change", () => {
-      if (folderInput.files.length) dispatchFiles(folderInput.files);
+      if (folderInput.files.length) {
+        const picked = Array.from(folderInput.files);
+        folderInput.value = "";
+        dispatchFiles(picked);
+      }
+    });
+
+    document.querySelectorAll('input[name="dest-target"]').forEach((radio) => {
+      radio.addEventListener("change", updateTargetHint);
     });
 
     ["dragenter", "dragover"].forEach((evt) => {
@@ -825,37 +992,81 @@
   }
 
   // --- Buzón de Entrega Rápida ------------------------------------------------
+  function formatBuzonExpiry(expiresIso) {
+    if (!expiresIso) return "TTL activo";
+    try {
+      const tsSec = new Date(expiresIso).getTime() / 1000;
+      if (isNaN(tsSec)) return expiresIso;
+      if (typeof window.formatExpiry === "function") {
+        return window.formatExpiry(tsSec);
+      }
+      return new Date(expiresIso).toLocaleString();
+    } catch {
+      return expiresIso;
+    }
+  }
+
   async function refreshBuzon() {
     const list = document.getElementById("buzon-list");
-    if (!list) return;
+    const badge = document.getElementById("badge-buzon-count");
     try {
       let res = await fetch("/api/buzon/lista");
       if (!res.ok) res = await fetch("/api/mailbox");
       const data = await res.json();
       if (!data || !data.ok) return;
 
-      list.innerHTML = "";
       const rawItems = data.items || data.archivos || [];
+      if (badge) {
+        if (rawItems.length > 0) {
+          badge.textContent = String(rawItems.length);
+          badge.style.display = "inline-flex";
+        } else {
+          badge.style.display = "none";
+        }
+      }
+
+      if (!list) return;
+      list.innerHTML = "";
       if (rawItems.length === 0) {
-        list.innerHTML = '<p class="empty-hint">El buzón está vacío.</p>';
+        list.innerHTML = '<p class="empty-hint">El buzón está vacío. Arrastra archivos aquí o pulsa "Dejar en Buzón".</p>';
         return;
       }
 
       rawItems.forEach((item) => {
         const row = document.createElement("div");
         row.className = "buzon-item";
+        const expiryStr = formatBuzonExpiry(item.expires_at);
+        const downloadedPill = item.is_downloaded ? '<span class="badge-pill">✓ Descargado</span>' : "";
+
         row.innerHTML = `
-          <div class="spread" style="align-items:center;">
-            <div>
-              <div class="buzon-name">📄 ${escapeHtml(item.file_name)}</div>
-              <div class="buzon-meta">${formatBytes(item.file_size)} · Expira: ${item.expires_at || "24h"}</div>
+          <div style="min-width:0; flex:1;">
+            <div class="row" style="gap:8px; align-items:center;">
+              <div class="buzon-item-name" title="${escapeHtml(item.file_name)}">📄 ${escapeHtml(item.file_name)}</div>
+              ${downloadedPill}
             </div>
-            <div class="row" style="gap:6px;">
-              <a href="/api/buzon/descargar/${item.id}" class="button primary" style="font-size:12px; padding:4px 8px; text-decoration:none;">⬇️ Descargar</a>
-              <button class="btn-danger btn-delete-buzon" data-id="${item.id}" style="font-size:12px; padding:4px 8px;">🗑️</button>
-            </div>
+            <div class="buzon-item-meta">${formatBytes(item.file_size)} · ${escapeHtml(expiryStr)}</div>
+          </div>
+          <div class="row" style="gap:6px; flex-shrink:0;">
+            <button type="button" class="primary btn-download-buzon" style="font-size:12px; padding:6px 12px; min-height:36px;">⬇️ Descargar</button>
+            <button type="button" class="btn-danger btn-delete-buzon" data-id="${item.id}" style="font-size:12px; padding:6px 10px; min-height:36px;" title="Eliminar del buzón">🗑️</button>
           </div>
         `;
+
+        row.querySelector(".btn-download-buzon").onclick = () => {
+          if (typeof window.downloadFileWithProgress === "function") {
+            window.downloadFileWithProgress({
+              url: `/api/buzon/descargar/${encodeURIComponent(item.id)}`,
+              filename: item.file_name || "archivo",
+              expectedSize: Number(item.file_size) || 0,
+              channel: "Buzón",
+              toast: toast,
+              onComplete: () => refreshBuzon(),
+            });
+          } else {
+            window.location.href = `/api/buzon/descargar/${encodeURIComponent(item.id)}`;
+          }
+        };
+
         list.appendChild(row);
       });
 
@@ -863,6 +1074,7 @@
         btn.onclick = async () => {
           let delRes = await fetch(`/api/buzon/borrar/${btn.dataset.id}`, { method: "POST" });
           if (!delRes.ok) await fetch(`/api/mailbox/${btn.dataset.id}`, { method: "DELETE" });
+          toast("Archivo eliminado del buzón.", "info");
           refreshBuzon();
         };
       });
@@ -875,13 +1087,49 @@
     const btnRefresh = document.getElementById("btn-buzon-refresh");
     const btnUpload = document.getElementById("btn-buzon-upload");
     const fileInput = document.getElementById("buzon-file-input");
+    const buzonDropArea = document.getElementById("buzon-drop-area");
 
     if (btnRefresh) btnRefresh.onclick = refreshBuzon;
     if (btnUpload && fileInput) {
       btnUpload.onclick = () => fileInput.click();
       fileInput.onchange = () => {
-        if (fileInput.files.length) uploadFilesToBuzon(fileInput.files);
+        if (fileInput.files.length) {
+          const picked = Array.from(fileInput.files);
+          fileInput.value = "";
+          uploadFilesToBuzon(picked);
+        }
       };
+    }
+
+    if (buzonDropArea) {
+      let dragDepth = 0;
+      buzonDropArea.addEventListener("dragenter", (e) => {
+        e.preventDefault();
+        dragDepth += 1;
+        buzonDropArea.classList.add("drop-active");
+      });
+      buzonDropArea.addEventListener("dragover", (e) => {
+        e.preventDefault();
+      });
+      buzonDropArea.addEventListener("dragleave", (e) => {
+        e.preventDefault();
+        dragDepth = Math.max(0, dragDepth - 1);
+        if (dragDepth === 0) buzonDropArea.classList.remove("drop-active");
+      });
+      buzonDropArea.addEventListener("drop", async (e) => {
+        e.preventDefault();
+        dragDepth = 0;
+        buzonDropArea.classList.remove("drop-active");
+        if (!e.dataTransfer) return;
+        let files = [];
+        if (typeof window.itemsFromDataTransfer === "function") {
+          const items = await window.itemsFromDataTransfer(e.dataTransfer);
+          files = items.map((i) => i.file).filter(Boolean);
+        } else if (e.dataTransfer.files) {
+          files = Array.from(e.dataTransfer.files);
+        }
+        if (files.length > 0) uploadFilesToBuzon(files);
+      });
     }
   }
 
@@ -889,23 +1137,34 @@
   async function loadConnectionQR() {
     const img = document.getElementById("qr-image");
     const urlText = document.getElementById("qr-url-text");
+    const qrDisplay = document.getElementById("qr-code-display");
+    const offlineHint = document.getElementById("qr-offline-hint");
     if (!img) return;
 
+    let directUrl = window.location.origin;
     try {
       const res = await fetch("/api/info");
       const info = await res.json();
-      const directUrl = info.public_url || window.location.origin;
-      if (urlText) urlText.textContent = directUrl;
-      img.src = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(directUrl)}`;
+      directUrl = info.public_url || window.location.origin;
     } catch {
-      if (urlText) urlText.textContent = window.location.origin;
-      img.src = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(window.location.origin)}`;
+      // Fallback to origin
     }
+    if (urlText) urlText.textContent = directUrl;
+
+    img.onerror = () => {
+      if (qrDisplay) qrDisplay.style.display = "none";
+      if (offlineHint) offlineHint.style.display = "block";
+    };
+    img.onload = () => {
+      if (qrDisplay) qrDisplay.style.display = "inline-block";
+      if (offlineHint) offlineHint.style.display = "none";
+    };
+    img.src = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(directUrl)}`;
 
     const btnCopy = document.getElementById("btn-copy-access-url");
     if (btnCopy) {
       btnCopy.onclick = () => {
-        const text = urlText.textContent;
+        const text = urlText ? urlText.textContent : directUrl;
         navigator.clipboard.writeText(text).then(() => toast("Enlace copiado al portapapeles."));
       };
     }
@@ -917,7 +1176,7 @@
     if (btnSave && inputName) {
       btnSave.onclick = async () => {
         const newName = inputName.value.trim();
-        if (!newName) return toast("Ingresa un nombre válido.", true);
+        if (!newName) return toast("Ingresa un nombre válido.", "warn");
         try {
           const res = await fetch(`/api/devices/${myDeviceId}/rename`, {
             method: "PATCH",
@@ -928,6 +1187,8 @@
           if (res.ok && data.ok) {
             myDeviceName = newName;
             localStorage.setItem("enlace_device_name", newName);
+            const badgeName = document.getElementById("badge-device-name");
+            if (badgeName) badgeName.textContent = newName;
             toast("Nombre del dispositivo actualizado.");
             socket.emit("register_device", {
               device_id: myDeviceId,
@@ -936,10 +1197,10 @@
               device_fingerprint: getDeviceFingerprint(),
             });
           } else {
-            toast(data.error || "Error al renombrar.", true);
+            toast(data.error || "Error al renombrar.", "error");
           }
         } catch {
-          toast("Error de conexión al renombrar.", true);
+          toast("Error de conexión al renombrar.", "error");
         }
       };
     }
@@ -996,7 +1257,16 @@
         btn.onclick = async () => {
           const devId = btn.dataset.id;
           const devName = btn.dataset.name;
-          if (confirm(`¿Estás seguro de que deseas desvincular "${devName}"? Ya no podrá enviar ni recibir archivos.`)) {
+          const confirmed = window.AppDialog
+            ? await window.AppDialog.confirm({
+                title: "Desvincular dispositivo",
+                message: `¿Estás seguro de que deseas desvincular "${devName}"? Ya no podrá enviar ni recibir archivos.`,
+                confirmText: "Desvincular",
+                danger: true,
+              })
+            : confirm(`¿Estás seguro de que deseas desvincular "${devName}"? Ya no podrá enviar ni recibir archivos.`);
+
+          if (confirmed) {
             try {
               const delRes = await fetch(`/api/devices/${devId}/revoke`, { method: "POST" });
               if (delRes.ok) {
@@ -1004,10 +1274,10 @@
                 loadEnrolledDevices();
                 fetchVisibleDevices();
               } else {
-                toast("No se pudo desvincular el dispositivo.", true);
+                toast("No se pudo desvincular el dispositivo.", "error");
               }
             } catch {
-              toast("Error al desvincular dispositivo.", true);
+              toast("Error al desvincular dispositivo.", "error");
             }
           }
         };
@@ -1023,7 +1293,11 @@
     if (btn && input) {
       btn.onclick = () => input.click();
       input.onchange = () => {
-        if (input.files.length) uploadFilesToS3(input.files);
+        if (input.files.length) {
+          const picked = Array.from(input.files);
+          input.value = "";
+          uploadFilesToS3(picked);
+        }
       };
     }
   }
@@ -1113,10 +1387,14 @@
       if (deviceType) localStorage.setItem("enlace_device_type", deviceType);
       document.cookie = "enlace_device_id=" + encodeURIComponent(deviceId) + "; path=/; max-age=31536000; SameSite=Lax";
 
-      // Update badge UI
+      // Update badge & settings UI
       const badgeName = document.getElementById("badge-device-name");
       const badgeIcon = document.getElementById("badge-device-icon");
+      const settingsInput = document.getElementById("input-own-device-name");
+      const settingsId = document.getElementById("input-own-device-id");
       if (badgeName) badgeName.textContent = myDeviceName;
+      if (settingsInput) settingsInput.value = myDeviceName;
+      if (settingsId) settingsId.value = myDeviceId;
       if (badgeIcon) {
         const dType = (deviceType || "pc").toLowerCase();
         const dName = (myDeviceName || "").toLowerCase();
@@ -1137,6 +1415,22 @@
     }
   };
 
+  function setupGlobalModalEscapes() {
+    document.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape") return;
+      ["offer-modal", "s3-preview-modal", "s3-share-modal", "device-switch-modal"].forEach((id) => {
+        const m = document.getElementById(id);
+        if (m && m.style.display !== "none" && m.style.display !== "") {
+          if (id === "offer-modal") {
+            document.getElementById("btn-offer-reject")?.click();
+          } else {
+            m.style.display = "none";
+          }
+        }
+      });
+    });
+  }
+
   // --- Inicialización al Cargar el DOM -----------------------------------------
   document.addEventListener("DOMContentLoaded", () => {
     setupTabs();
@@ -1147,6 +1441,20 @@
     setupBuzon();
     setupDeviceSettings();
     setupS3DirectUpload();
+    setupGlobalModalEscapes();
+
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/service-worker.js").catch(() => {});
+    }
+
+    // Inicializar módulos de Amigos, Logs y conteo inicial de Buzón
+    if (window.activityLogger && typeof window.activityLogger.init === "function") {
+      window.activityLogger.init("activity-logs-container", socket);
+    }
+    if (window.friendsManager && typeof window.friendsManager.init === "function") {
+      window.friendsManager.init();
+    }
+    refreshBuzon();
 
     // Resolver ID de dispositivo canónico si la sesión no lo tenía en template
     if (!myDeviceId) {

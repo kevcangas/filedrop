@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#0c1420">
 <title>Enlace · FileDrop Multiplataforma</title>
 <link rel="manifest" href="/manifest.json">
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/style.css?v=23">
 <script>
   window.__FILEDROP_USER__ = {{ current_user | tojson | safe }};
   window.__FILEDROP_DEVICE__ = {{ current_device | tojson | safe }};
@@ -43,29 +43,32 @@
 
 <main class="app-main-content">
   <!-- ── Barra de Pestañas Responsiva ── -->
-  <nav class="page-tabs" role="tablist">
-    <button type="button" class="tab-btn primary active" id="tab-btn-transfer" data-tab="transfer">
+  <nav class="page-tabs" role="tablist" aria-label="Navegación principal">
+    <button type="button" class="tab-btn primary active" id="tab-btn-transfer" data-tab="transfer" role="tab" aria-selected="true" aria-controls="tab-content-transfer">
       <span class="tab-icon">📤</span> <span class="tab-label">Transferir</span>
+      <span class="tab-badge" id="badge-active-transfers" style="display:none;">0</span>
     </button>
-    <button type="button" class="tab-btn" id="tab-btn-s3" data-tab="s3">
-      <span class="tab-icon">☁️</span> <span class="tab-label">Almacenamiento S3</span>
+    <button type="button" class="tab-btn" id="tab-btn-s3" data-tab="s3" role="tab" aria-selected="false" aria-controls="tab-content-s3">
+      <span class="tab-icon">☁️</span> <span class="tab-label">Nube S3</span>
     </button>
-    <button type="button" class="tab-btn" id="tab-btn-buzon" data-tab="buzon">
+    <button type="button" class="tab-btn" id="tab-btn-buzon" data-tab="buzon" role="tab" aria-selected="false" aria-controls="tab-content-buzon">
       <span class="tab-icon">📥</span> <span class="tab-label">Buzón</span>
+      <span class="tab-badge" id="badge-buzon-count" style="display:none;">0</span>
     </button>
-    <button type="button" class="tab-btn" id="tab-btn-friends" data-tab="friends">
+    <button type="button" class="tab-btn" id="tab-btn-friends" data-tab="friends" role="tab" aria-selected="false" aria-controls="tab-content-friends">
       <span class="tab-icon">👥</span> <span class="tab-label">Amigos</span>
+      <span class="tab-badge" id="badge-friends-pending" style="display:none;">0</span>
     </button>
-    <button type="button" class="tab-btn" id="tab-btn-logs" data-tab="logs">
+    <button type="button" class="tab-btn" id="tab-btn-logs" data-tab="logs" role="tab" aria-selected="false" aria-controls="tab-content-logs">
       <span class="tab-icon">📋</span> <span class="tab-label">Logs</span>
     </button>
-    <button type="button" class="tab-btn" id="tab-btn-config" data-tab="config">
+    <button type="button" class="tab-btn" id="tab-btn-config" data-tab="config" role="tab" aria-selected="false" aria-controls="tab-content-config">
       <span class="tab-icon">⚙️</span> <span class="tab-label">Ajustes</span>
     </button>
   </nav>
 
   <!-- ══════════════════ PESTAÑA: TRANSFERIR ══════════════════ -->
-  <section class="tab-content-panel active" id="tab-content-transfer">
+  <section class="tab-content-panel active" id="tab-content-transfer" role="tabpanel" aria-labelledby="tab-btn-transfer">
     <div class="grid transfer-grid">
       <!-- Columna izquierda: Dispositivos y Portapapeles -->
       <div class="stack side-stack">
@@ -133,7 +136,10 @@
         </div>
 
         <div class="panel transfers-panel">
-          <p class="panel-title">Transferencias activas</p>
+          <div class="spread panel-header-row">
+            <p class="panel-title" style="margin-bottom:0;">Transferencias activas</p>
+            <button type="button" id="btn-clear-transfers" class="btn-subtle" style="display:none; font-size:11px; padding:4px 10px; min-height:28px;">Limpiar completadas</button>
+          </div>
           <div id="transfer-list" class="stack">
             <p class="empty-hint">No hay transferencias en curso.</p>
           </div>
@@ -143,8 +149,9 @@
   </section>
 
   <!-- ══════════════════ PESTAÑA: ALMACENAMIENTO S3 ══════════════════ -->
-  <section class="tab-content-panel" id="tab-content-s3" style="display:none;">
-    <div class="panel s3-panel">
+  <section class="tab-content-panel" id="tab-content-s3" role="tabpanel" aria-labelledby="tab-btn-s3" style="display:none;">
+    <div class="panel s3-panel drop-target-panel" id="s3-drop-area">
+      <div class="drop-overlay-hint">☁️ Suelta tus archivos para subirlos a esta carpeta S3</div>
       <div class="spread s3-header" style="align-items:center; flex-wrap:wrap; gap:10px;">
         <div>
           <p class="panel-title" style="margin-bottom:2px;">☁️ Almacenamiento en la Nube S3</p>
@@ -153,17 +160,28 @@
             <span class="device-meta" id="s3-stats-meta">0 archivos · 0 MB</span>
           </div>
         </div>
-        <div class="row s3-actions" style="gap:8px;">
-          <button id="btn-s3-direct-upload" class="primary">⬆️ Subir a S3</button>
-          <button id="btn-s3-new-folder">➕ Nueva Carpeta</button>
-          <button id="btn-s3-refresh" class="btn-icon">🔄</button>
+        <div class="row s3-actions" style="gap:8px; flex-wrap:wrap; margin-left:0;">
+          <button type="button" id="btn-s3-direct-upload" class="primary">⬆️ Subir archivos</button>
+          <button type="button" id="btn-s3-folder-upload" class="btn-secondary">📁 Subir carpeta</button>
+          <button type="button" id="btn-s3-new-folder">➕ Nueva Carpeta</button>
+          <button type="button" id="btn-s3-refresh" class="btn-icon" title="Refrescar S3">🔄</button>
           <input type="file" id="s3-direct-file-input" multiple style="display:none;">
+          <input type="file" id="s3-folder-input" webkitdirectory style="display:none;">
         </div>
       </div>
 
-      <!-- Barra de búsqueda S3 -->
-      <div class="s3-search-bar" style="margin-top:14px;">
-        <input type="text" id="s3-search-input" placeholder="🔍 Filtrar archivos por nombre en esta carpeta..." style="width:100%;">
+      <!-- Barra de búsqueda y orden S3 -->
+      <div class="s3-toolbar" style="margin-top:14px;">
+        <div class="s3-search-wrap">
+          <input type="text" id="s3-search-input" placeholder="🔍 Filtrar archivos y carpetas...">
+          <button type="button" id="btn-s3-search-clear" class="btn-search-clear" style="display:none;" title="Limpiar búsqueda">✕</button>
+        </div>
+        <select id="s3-sort-select" class="s3-sort-select" aria-label="Ordenar archivos">
+          <option value="name-asc">Nombre (A–Z)</option>
+          <option value="name-desc">Nombre (Z–A)</option>
+          <option value="date-desc">Más recientes</option>
+          <option value="size-desc">Mayor tamaño</option>
+        </select>
       </div>
 
       <!-- Migas de pan (Breadcrumbs) -->
@@ -188,16 +206,17 @@
   </section>
 
   <!-- ══════════════════ PESTAÑA: BUZÓN RÁPIDO ══════════════════ -->
-  <section class="tab-content-panel" id="tab-content-buzon" style="display:none;">
-    <div class="panel buzon-panel">
+  <section class="tab-content-panel" id="tab-content-buzon" role="tabpanel" aria-labelledby="tab-btn-buzon" style="display:none;">
+    <div class="panel buzon-panel drop-target-panel" id="buzon-drop-area">
+      <div class="drop-overlay-hint">📥 Suelta tus archivos para dejarlos en el Buzón Rápido</div>
       <div class="spread buzon-header" style="margin-bottom:12px;">
         <div>
           <p class="panel-title" style="margin-bottom:2px;">📥 Buzón de Entrega Rápida</p>
           <p class="panel-subtitle">Archivos temporales con auto-expiración tras descarga o TTL cumplido.</p>
         </div>
         <div class="row" style="gap:8px;">
-          <button id="btn-buzon-upload" class="primary">⬆️ Dejar en Buzón</button>
-          <button id="btn-buzon-refresh" class="btn-icon">🔄</button>
+          <button type="button" id="btn-buzon-upload" class="primary">⬆️ Dejar en Buzón</button>
+          <button type="button" id="btn-buzon-refresh" class="btn-icon" title="Refrescar buzón">🔄</button>
           <input type="file" id="buzon-file-input" multiple style="display:none;">
         </div>
       </div>
@@ -208,7 +227,7 @@
   </section>
 
   <!-- ══════════════════ PESTAÑA: AMIGOS ══════════════════ -->
-  <section class="tab-content-panel" id="tab-content-friends" style="display:none;">
+  <section class="tab-content-panel" id="tab-content-friends" role="tabpanel" aria-labelledby="tab-btn-friends" style="display:none;">
     <div class="grid friends-grid">
       <div class="panel">
         <p class="panel-title">👥 Mis Amigos Conectados</p>
@@ -235,7 +254,7 @@
   </section>
 
   <!-- ══════════════════ PESTAÑA: AUDITORÍA Y LOGS ══════════════════ -->
-  <section class="tab-content-panel" id="tab-content-logs" style="display:none;">
+  <section class="tab-content-panel" id="tab-content-logs" role="tabpanel" aria-labelledby="tab-btn-logs" style="display:none;">
     <div class="panel logs-panel">
       <div class="spread logs-header" style="margin-bottom:12px;">
         <div>
@@ -243,8 +262,8 @@
           <p class="panel-subtitle">Monitoreo en tiempo real de transferencias P2P, S3 y eventos de seguridad.</p>
         </div>
         <div class="row" style="gap:8px;">
-          <button id="btn-clear-logs" class="btn-subtle">Limpiar</button>
-          <button id="btn-export-logs" class="primary">Exportar JSON</button>
+          <button type="button" id="btn-clear-logs" class="btn-subtle">Limpiar</button>
+          <button type="button" id="btn-export-logs" class="primary">Exportar JSON</button>
         </div>
       </div>
       <div id="activity-logs-container" class="stack logs-container">
@@ -254,27 +273,35 @@
   </section>
 
   <!-- ══════════════════ PESTAÑA: AJUSTES Y QR ══════════════════ -->
-  <section class="tab-content-panel" id="tab-content-config" style="display:none;">
+  <section class="tab-content-panel" id="tab-content-config" role="tabpanel" aria-labelledby="tab-btn-config" style="display:none;">
     <div class="grid config-grid">
       <div class="panel">
+        <div class="account-summary-card">
+          <div>
+            <strong style="font-size:14px;">👤 {{ current_user.display_name or current_user.username }}</strong>
+            <div class="device-meta">@{{ current_user.username }}</div>
+          </div>
+          <a href="/logout" class="btn-danger" style="text-decoration:none; padding:6px 12px; border-radius:8px; font-size:12px; font-weight:600;">Cerrar sesión</a>
+        </div>
+
         <p class="panel-title">⚙️ Ajustes de este Dispositivo</p>
         <p class="panel-subtitle">Identificación visible ante otros dispositivos en la red.</p>
         <div class="stack" style="margin-top:14px; gap:12px;">
           <div>
-            <label class="config-label">Nombre del dispositivo:</label>
+            <label class="config-label" for="input-own-device-name">Nombre del dispositivo:</label>
             <input type="text" id="input-own-device-name" value="{{ current_device.device_name }}">
           </div>
           <div>
-            <label class="config-label">Identificador único (UUID):</label>
+            <label class="config-label" for="input-own-device-id">Identificador único (UUID):</label>
             <input type="text" id="input-own-device-id" value="{{ current_device.id }}" readonly style="opacity:0.7;">
           </div>
-          <button id="btn-save-device-name" class="primary">Guardar Nombre</button>
+          <button type="button" id="btn-save-device-name" class="primary">Guardar Nombre</button>
         </div>
 
         <div style="margin-top:22px; padding-top:16px; border-top:1px solid var(--border);">
           <div class="spread" style="align-items:center; margin-bottom:8px;">
             <p class="panel-title" style="font-size:14px; margin:0;">📱 Mis Dispositivos Vinculados</p>
-            <button id="btn-refresh-devices-list" class="btn-icon" title="Refrescar lista">🔄</button>
+            <button type="button" id="btn-refresh-devices-list" class="btn-icon" title="Refrescar lista">🔄</button>
           </div>
           <p class="panel-subtitle" style="margin-bottom:10px;">Gestiona y desvincula equipos autorizados en tu cuenta.</p>
           <div id="enrolled-devices-list" class="stack" style="gap:8px;">
@@ -290,8 +317,11 @@
           <div id="qr-code-display" style="display:inline-block; padding:8px; background:#fff; border-radius:8px;">
             <img id="qr-image" src="" alt="Código QR de Conexión" style="width:160px; height:160px; display:block;">
           </div>
+          <div id="qr-offline-hint" class="empty-hint" style="display:none; padding:12px; border:1px dashed var(--border); border-radius:8px;">
+            Sin acceso a internet para generar el QR visual. Abre el enlace directo de abajo en tu otro dispositivo.
+          </div>
           <p id="qr-url-text" class="device-meta" style="margin-top:10px; word-break:break-all;">Cargando dirección...</p>
-          <button id="btn-copy-access-url" class="btn-subtle" style="margin-top:6px;">📋 Copiar Enlace Directo</button>
+          <button type="button" id="btn-copy-access-url" class="btn-subtle" style="margin-top:6px;">📋 Copiar Enlace Directo</button>
         </div>
       </div>
     </div>
@@ -335,13 +365,21 @@
   <div class="modal-window">
     <p class="modal-title">🔗 Compartir Archivo S3</p>
     <p class="modal-desc">Enlace temporal público para descargar sin necesidad de iniciar sesión:</p>
-    <div class="stack" style="margin-top:12px; gap:8px;">
+    <div class="stack" style="margin-top:12px; gap:10px;">
+      <div>
+        <label class="config-label" for="share-expiry-select">Duración del enlace:</label>
+        <select id="share-expiry-select" class="s3-sort-select" style="width:100%;">
+          <option value="3600">1 hora</option>
+          <option value="86400" selected>24 horas</option>
+          <option value="604800">7 días</option>
+        </select>
+      </div>
       <input type="text" id="input-share-url" readonly style="width:100%;">
       <span class="device-meta" id="share-expiry-meta">Válido durante 24 horas</span>
     </div>
     <div class="modal-actions" style="margin-top:16px;">
-      <button id="btn-copy-share-url" class="primary">📋 Copiar Enlace</button>
-      <button id="btn-close-share-modal">Cerrar</button>
+      <button type="button" id="btn-copy-share-url" class="primary">📋 Copiar Enlace</button>
+      <button type="button" id="btn-close-share-modal" class="btn-subtle">Cerrar</button>
     </div>
   </div>
 </div>
@@ -365,19 +403,44 @@
   </div>
 </div>
 
+<!-- ══════════════════ MODAL REUTILIZABLE: CONFIRMAR / PROMPT ══════════════════ -->
+<div id="app-dialog-modal" class="modal-backdrop" style="display:none;" role="dialog" aria-modal="true">
+  <div class="modal-window" style="max-width:420px;">
+    <p class="modal-title" id="app-dialog-title">Confirmar</p>
+    <p class="modal-desc" id="app-dialog-message"></p>
+    <div id="app-dialog-input-wrap" style="display:none; margin-bottom:16px;">
+      <input type="text" id="app-dialog-input" autocomplete="off">
+    </div>
+    <div class="modal-actions">
+      <button type="button" id="app-dialog-cancel" class="btn-subtle">Cancelar</button>
+      <button type="button" id="app-dialog-confirm" class="primary">Aceptar</button>
+    </div>
+  </div>
+</div>
 
-<!-- Contexto Inicial del Servidor -->
-<script>
-  window.__FILEDROP_USER__ = {{ current_user | tojson | safe }};
-  window.__FILEDROP_DEVICE__ = {{ current_device | tojson | safe }};
-</script>
+<!-- ══════════════════ DOCK FLOTANTE GLOBAL DE TRANSFERENCIAS ══════════════════ -->
+<aside id="transfer-dock" class="transfer-dock" style="display:none;" aria-label="Progreso de transferencias">
+  <div class="transfer-dock-header">
+    <div class="row" style="gap:8px; min-width:0; flex:1; flex-wrap:nowrap;">
+      <span class="pulse live"></span>
+      <span id="transfer-dock-summary" class="transfer-dock-summary">Transferencias</span>
+    </div>
+    <div class="row" style="gap:4px; flex-shrink:0;">
+      <button type="button" id="btn-dock-clear" class="btn-dock-ctrl" style="display:none;" title="Limpiar completadas">Limpiar</button>
+      <button type="button" id="btn-dock-toggle" class="btn-dock-ctrl" title="Minimizar panel">▾</button>
+      <button type="button" id="btn-dock-close" class="btn-dock-ctrl" title="Ocultar">✕</button>
+    </div>
+  </div>
+  <div id="transfer-dock-list" class="transfer-dock-list"></div>
+</aside>
 
 <!-- Scripts del Cliente -->
 <script src="/static/socket.io.min.js"></script>
 <script src="/static/jszip.min.js"></script>
-<script src="/static/transfer.js?v=22"></script>
-<script src="/static/friends.js?v=22"></script>
-<script src="/static/activity-logger.js?v=22"></script>
-<script src="/static/app.js?v=22"></script>
+<script src="/static/transfer-ui.js?v=23"></script>
+<script src="/static/transfer.js?v=23"></script>
+<script src="/static/friends.js?v=23"></script>
+<script src="/static/activity-logger.js?v=23"></script>
+<script src="/static/app.js?v=23"></script>
 </body>
 </html>

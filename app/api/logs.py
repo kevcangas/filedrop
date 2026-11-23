@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from flask import Blueprint, jsonify, request, session
 from sqlalchemy import or_, select
 
-from app.models import Device, TransferLog, User
+from app.models import Device, TransferLog, User, to_uuid
 
 logs_bp = Blueprint("logs_bp", __name__, url_prefix="/api/logs")
 
@@ -17,7 +17,7 @@ def get_db():
 
 
 def require_user():
-    user_id = session.get("user_id")
+    user_id = to_uuid(session.get("user_id"))
     if not user_id:
         return None
     db_sess = get_db()

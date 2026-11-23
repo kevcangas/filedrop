@@ -1,8 +1,9 @@
-const CACHE_NAME = "enlace-shell-v22";
+const CACHE_NAME = "enlace-shell-v23";
 const SHELL_FILES = [
   "/manifest.json",
   "/static/style.css",
   "/static/app.js",
+  "/static/transfer-ui.js",
   "/static/transfer.js",
   "/static/friends.js",
   "/static/activity-logger.js",

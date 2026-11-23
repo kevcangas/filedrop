@@ -1,204 +1,233 @@
 /**
- * Friends & Devices Client Controller
- * Manages user identity, friend requests, and enrolled device list.
+ * Friends & Devices Client Controller (static/friends.js)
+ * Wires the Amigos tab in app.html: friend listing, invitations, accept/decline,
+ * and live pending request badge counter.
  */
 
-class FriendsManager {
-  constructor() {
-    this.currentUser = null;
-    this.currentDevice = null;
-    this.friends = [];
-    this.pendingIncoming = [];
-    this.pendingOutgoing = [];
-    this.container = null;
+(function () {
+  "use strict";
+
+  function esc(text) {
+    if (typeof window.escapeHtml === "function") return window.escapeHtml(text);
+    const d = document.createElement("div");
+    d.textContent = text == null ? "" : String(text);
+    return d.innerHTML;
   }
 
-  async init(containerId) {
-    this.container = document.getElementById(containerId);
-    if (!this.container) return;
-    await this.fetchMe();
-    await this.fetchFriends();
-    this.render();
-  }
-
-  async fetchMe() {
-    try {
-      const res = await fetch("/api/auth/me");
-      if (!res.ok) return;
-      const data = await res.json();
-      if (data.ok) {
-        this.currentUser = data.user;
-        this.currentDevice = data.current_device;
-      }
-    } catch (e) {
-      console.warn("Could not fetch user session", e);
+  class FriendsManager {
+    constructor() {
+      this.friends = [];
+      this.pendingIncoming = [];
+      this.pendingOutgoing = [];
+      this.eventsBound = false;
     }
-  }
 
-  async fetchFriends() {
-    try {
-      const res = await fetch("/api/friends/list");
-      if (!res.ok) return;
-      const data = await res.json();
-      if (data.ok) {
-        this.friends = data.friends || [];
-        this.pendingIncoming = data.pending_incoming || [];
-        this.pendingOutgoing = data.pending_outgoing || [];
-      }
-    } catch (e) {
-      console.warn("Could not fetch friends list", e);
+    async init() {
+      this.bindStaticEvents();
+      await this.refresh();
     }
-  }
 
-  render() {
-    if (!this.container) return;
+    bindStaticEvents() {
+      if (this.eventsBound) return;
+      const btnSend = document.getElementById("btn-send-friend-request");
+      const inputUser = document.getElementById("input-friend-username");
+      if (!btnSend && !inputUser) return;
+      this.eventsBound = true;
 
-    const userBadge = this.currentUser
-      ? `<div class="spread" style="align-items:center; background:var(--panel-2); padding:10px 14px; border-radius:8px; border:1px solid var(--border); margin-bottom:14px;">
-          <div>
-            <strong style="color:var(--text); font-size:14px;">👤 ${this.currentUser.display_name}</strong>
-            <span style="color:var(--text-muted); font-size:12px; margin-left:6px;">(@${this.currentUser.username})</span>
-            <div style="color:var(--text-muted); font-size:11px; margin-top:2px;">Dispositivo actual: <em>${this.currentDevice ? this.currentDevice.device_name : 'Navegador Web'}</em></div>
-          </div>
-          <button id="btn-account-logout" style="font-size:11px; padding:4px 8px; border-color:var(--danger); color:var(--danger);">Cerrar Sesión</button>
-        </div>`
-      : `<p class="empty-hint">Sesión no iniciada como usuario registrado.</p>`;
+      const sendRequest = async () => {
+        if (!inputUser) return;
+        const username = inputUser.value.trim();
+        if (!username) {
+          this.notify("Ingresa un nombre de usuario.", true);
+          return;
+        }
+        btnSend.disabled = true;
+        const prevText = btnSend.textContent;
+        btnSend.textContent = "Enviando…";
+        try {
+          const res = await fetch("/api/friends/request", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ username }),
+          });
+          const data = await res.json();
+          if (res.ok && data.ok) {
+            this.notify(data.message || `Solicitud enviada a @${username}.`, false);
+            inputUser.value = "";
+            await this.refresh();
+          } else {
+            this.notify(data.error || "No se pudo enviar la solicitud.", true);
+          }
+        } catch {
+          this.notify("Error de conexión al enviar solicitud.", true);
+        } finally {
+          btnSend.disabled = false;
+          btnSend.textContent = prevText;
+        }
+      };
 
-    const incomingHtml = this.pendingIncoming.length > 0
-      ? `<div style="margin-bottom:14px;">
-          <p class="subcard-title" style="color:var(--accent);">📩 Solicitudes Recibidas (${this.pendingIncoming.length})</p>
-          <div class="stack">
-            ${this.pendingIncoming.map(p => `
-              <div class="spread" style="background:var(--panel-2); padding:8px 12px; border-radius:6px; align-items:center;">
-                <div>
-                  <strong>@${p.requester?.username}</strong>
-                  <span style="font-size:11px; color:var(--text-muted); margin-left:4px;">(${p.requester?.display_name})</span>
-                </div>
-                <div class="row" style="gap:6px;">
-                  <button class="primary btn-friend-accept" data-id="${p.friendship_id}" style="font-size:11px; padding:4px 8px;">Aceptar</button>
-                  <button class="btn-friend-decline" data-id="${p.friendship_id}" style="font-size:11px; padding:4px 8px;">Rechazar</button>
-                </div>
-              </div>
-            `).join("")}
-          </div>
-        </div>`
-      : "";
-
-    const friendsListHtml = this.friends.length > 0
-      ? `<div class="stack">
-          ${this.friends.map(f => {
-            const devCount = f.devices ? f.devices.length : 0;
-            return `
-              <div class="subcard" style="padding:10px 12px;">
-                <div class="spread" style="align-items:center;">
-                  <div>
-                    <strong style="color:var(--ok);">🟢 @${f.username}</strong>
-                    <span style="color:var(--text-muted); font-size:12px; margin-left:4px;">(${f.display_name})</span>
-                  </div>
-                  <span class="badge-pill">${devCount} disp.</span>
-                </div>
-                ${f.devices && f.devices.length > 0
-                  ? `<div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap;">
-                      ${f.devices.map(d => `<span style="background:var(--bg); border:1px solid var(--border); border-radius:4px; font-size:11px; padding:2px 6px; color:var(--text-muted);">${d.device_type === 'pc' ? '💻' : '📱'} ${d.device_name}</span>`).join("")}
-                     </div>`
-                  : `<p class="hint-small" style="margin-top:4px;">Sin dispositivos activos</p>`
-                }
-              </div>
-            `;
-          }).join("")}
-        </div>`
-      : `<p class="empty-hint" style="padding:8px 0;">Aún no tienes amigos agregados.</p>`;
-
-    this.container.innerHTML = `
-      <div class="panel">
-        <p class="panel-title">👥 Amigos y Cuentas Vinculadas</p>
-        ${userBadge}
-
-        <!-- Enviar solicitud -->
-        <div style="margin-bottom:16px;">
-          <label style="font-size:12px; font-weight:600; color:var(--text-muted);">AGREGAR AMIGO POR USUARIO</label>
-          <div class="row" style="gap:8px; margin-top:6px;">
-            <input type="text" id="input-friend-username" placeholder="Nombre de usuario del amigo..." style="flex:1;">
-            <button class="primary" id="btn-friend-send-req" style="white-space:nowrap;">➕ Invitar</button>
-          </div>
-          <p id="friend-feedback" class="hint-small" style="display:none;"></p>
-        </div>
-
-        ${incomingHtml}
-
-        <p class="subcard-title">Mis Amigos Aceptados</p>
-        ${friendsListHtml}
-      </div>
-    `;
-
-    this.bindEvents();
-  }
-
-  bindEvents() {
-    document.getElementById("btn-account-logout")?.addEventListener("click", async () => {
-      await fetch("/api/auth/logout", { method: "POST" });
-      window.location.href = "/login";
-    });
-
-    document.getElementById("btn-friend-send-req")?.addEventListener("click", async () => {
-      const input = document.getElementById("input-friend-username");
-      const feedback = document.getElementById("friend-feedback");
-      const username = input.value.trim();
-      if (!username) return;
-
-      feedback.style.display = "block";
-      feedback.style.color = "var(--text-muted)";
-      feedback.textContent = "Enviando invitación...";
-
-      try {
-        const res = await fetch("/api/friends/request", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username }),
+      if (btnSend) btnSend.addEventListener("click", sendRequest);
+      if (inputUser) {
+        inputUser.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            sendRequest();
+          }
         });
+      }
+    }
+
+    notify(msg, isWarn = false) {
+      if (typeof window.showToast === "function") {
+        window.showToast(msg, isWarn ? "warn" : "success");
+      }
+    }
+
+    async refresh() {
+      await this.fetchFriends();
+      this.render();
+      this.updateBadge();
+    }
+
+    async fetchFriends() {
+      try {
+        const res = await fetch("/api/friends/list");
+        if (!res.ok) return;
         const data = await res.json();
-        if (data.ok) {
-          feedback.style.color = "var(--ok)";
-          feedback.textContent = data.message || "Invitación enviada.";
-          input.value = "";
-          await this.fetchFriends();
-          setTimeout(() => this.render(), 1200);
-        } else {
-          feedback.style.color = "var(--danger)";
-          feedback.textContent = data.error || "No se pudo enviar.";
+        if (data && data.ok) {
+          this.friends = data.friends || [];
+          this.pendingIncoming = data.pending_incoming || [];
+          this.pendingOutgoing = data.pending_outgoing || [];
         }
       } catch (e) {
-        feedback.style.color = "var(--danger)";
-        feedback.textContent = "Error de conexión.";
+        console.warn("Could not fetch friends list", e);
       }
-    });
+    }
 
-    this.container.querySelectorAll(".btn-friend-accept").forEach(b => {
-      b.addEventListener("click", async (e) => {
-        const friendship_id = e.target.dataset.id;
-        await fetch("/api/friends/respond", {
+    updateBadge() {
+      const badge = document.getElementById("badge-friends-pending");
+      if (!badge) return;
+      const count = this.pendingIncoming.length;
+      if (count > 0) {
+        badge.textContent = String(count);
+        badge.style.display = "inline-flex";
+      } else {
+        badge.style.display = "none";
+      }
+    }
+
+    render() {
+      const friendsEl = document.getElementById("friends-list");
+      const pendingEl = document.getElementById("pending-friends-list");
+
+      if (friendsEl) {
+        if (this.friends.length === 0) {
+          friendsEl.innerHTML = '<p class="empty-hint">Aún no tienes amigos agregados. Envía una solicitud por usuario.</p>';
+        } else {
+          friendsEl.innerHTML = this.friends
+            .map((f) => {
+              const devs = f.devices || [];
+              const devHtml =
+                devs.length > 0
+                  ? `<div class="row" style="gap:6px; margin-top:8px;">
+                      ${devs
+                        .map((d) => {
+                          const icon = d.device_type === "pc" ? "💻" : d.device_type === "tablet" ? "📟" : "📱";
+                          return `<span class="device-chip">${icon} ${esc(d.device_name)}</span>`;
+                        })
+                        .join("")}
+                    </div>`
+                  : `<p class="device-meta" style="margin-top:6px;">Sin dispositivos registrados</p>`;
+
+              return `
+                <div class="friend-card">
+                  <div class="spread" style="align-items:center;">
+                    <div>
+                      <strong style="color:var(--accent-green);">@${esc(f.username)}</strong>
+                      <span class="device-meta" style="margin-left:6px;">${esc(f.display_name || "")}</span>
+                    </div>
+                    <span class="badge-pill">${devs.length} disp.</span>
+                  </div>
+                  ${devHtml}
+                </div>
+              `;
+            })
+            .join("");
+        }
+      }
+
+      if (pendingEl) {
+        if (this.pendingIncoming.length === 0 && this.pendingOutgoing.length === 0) {
+          pendingEl.innerHTML = '<p class="empty-hint">No tienes solicitudes pendientes.</p>';
+        } else {
+          const incomingHtml = this.pendingIncoming
+            .map((p) => {
+              const req = p.requester || {};
+              return `
+                <div class="friend-pending-row">
+                  <div style="min-width:0;">
+                    <strong>@${esc(req.username || "usuario")}</strong>
+                    <div class="device-meta">${esc(req.display_name || "Solicitud entrante")}</div>
+                  </div>
+                  <div class="row" style="gap:6px;">
+                    <button type="button" class="primary btn-friend-accept" data-id="${esc(p.friendship_id)}" style="padding:6px 10px; min-height:34px; font-size:12px;">Aceptar</button>
+                    <button type="button" class="btn-danger btn-friend-decline" data-id="${esc(p.friendship_id)}" style="padding:6px 10px; min-height:34px; font-size:12px;">Rechazar</button>
+                  </div>
+                </div>
+              `;
+            })
+            .join("");
+
+          const outgoingHtml = this.pendingOutgoing
+            .map((p) => {
+              const addr = p.addressee || {};
+              return `
+                <div class="friend-pending-row">
+                  <div style="min-width:0;">
+                    <strong>@${esc(addr.username || "usuario")}</strong>
+                    <div class="device-meta">Esperando respuesta…</div>
+                  </div>
+                  <span class="badge-pill">Enviada</span>
+                </div>
+              `;
+            })
+            .join("");
+
+          pendingEl.innerHTML = incomingHtml + outgoingHtml;
+
+          pendingEl.querySelectorAll(".btn-friend-accept").forEach((btn) => {
+            btn.addEventListener("click", () => this.respondRequest(btn.dataset.id, "ACCEPT"));
+          });
+          pendingEl.querySelectorAll(".btn-friend-decline").forEach((btn) => {
+            btn.addEventListener("click", () => this.respondRequest(btn.dataset.id, "DECLINE"));
+          });
+        }
+      }
+    }
+
+    async respondRequest(friendshipId, action) {
+      try {
+        const res = await fetch("/api/friends/respond", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ friendship_id, action: "ACCEPT" }),
+          body: JSON.stringify({ friendship_id: friendshipId, action }),
         });
-        await this.fetchFriends();
-        this.render();
-      });
-    });
-
-    this.container.querySelectorAll(".btn-friend-decline").forEach(b => {
-      b.addEventListener("click", async (e) => {
-        const friendship_id = e.target.dataset.id;
-        await fetch("/api/friends/respond", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ friendship_id, action: "DECLINE" }),
-        });
-        await this.fetchFriends();
-        this.render();
-      });
-    });
+        const data = await res.json();
+        if (res.ok && data.ok) {
+          this.notify(action === "ACCEPT" ? "Amigo aceptado. Sus dispositivos ahora son visibles." : "Solicitud rechazada.");
+          await this.refresh();
+          if (action === "ACCEPT" && typeof window.refreshVisibleDevices === "function") {
+            window.refreshVisibleDevices();
+          }
+        } else {
+          this.notify(data.error || "No se pudo procesar la respuesta.", true);
+        }
+      } catch {
+        this.notify("Error de conexión al responder solicitud.", true);
+      }
+    }
   }
-}
 
-window.friendsManager = new FriendsManager();
+  window.friendsManager = new FriendsManager();
+  window.loadFriendsList = () => window.friendsManager.refresh();
+})();
