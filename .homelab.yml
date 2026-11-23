@@ -6,4 +6,4 @@ services:
     subdomain: filedrop
     homepage: true
     icon: mdi-file-transfer
-    description: "Transferencia de archivos P2P, buzón temporal, sincronización y almacenamiento en nube S3"
+    description: "P2P file transfer, temporary dropbox, sync, and S3 cloud storage"
